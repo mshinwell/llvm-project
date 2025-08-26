@@ -11,6 +11,7 @@ add_lldb_library(lldbValueObject
   ValueObjectConstResultChild.cpp
   ValueObjectConstResultImpl.cpp
   ValueObjectDynamicValue.cpp
+  ValueObjectImplicitPointer.cpp
   ValueObjectList.cpp
   ValueObjectMemory.cpp
   ValueObjectRegister.cpp

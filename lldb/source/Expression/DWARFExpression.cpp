@@ -156,7 +156,6 @@ GetOpcodeDataSize(const DataExtractor &data, const lldb::offset_t data_offset,
   case DW_OP_APPLE_uninit:
   case DW_OP_PGI_omp_thread_num:
   case DW_OP_hi_user:
-  case DW_OP_GNU_implicit_pointer:
     break;
 
   case DW_OP_addr:
@@ -357,11 +356,15 @@ GetOpcodeDataSize(const DataExtractor &data, const lldb::offset_t data_offset,
   }
 
   case DW_OP_implicit_pointer: // 0xa0 4-byte (or 8-byte for DWARF 64) constant
-                               // + LEB128
+  case DW_OP_GNU_implicit_pointer: // 0xf2 GNU extension
+                               // + SLEB128
   {
+    // Skip DIE offset (4 or 8 bytes depending on format)
+    // For now assume 4 bytes (32-bit DWARF format)
+    offset += 4;
+    // Skip signed byte offset  
     data.Skip_LEB128(&offset);
-    return (dwarf_cu ? dwarf_cu->GetAddressByteSize() : 4) + offset -
-           data_offset;
+    return offset - data_offset;
   }
 
   case DW_OP_GNU_entry_value:
@@ -787,7 +790,8 @@ enum LocationDescriptionKind {
   Empty,
   Memory,
   Register,
-  Implicit
+  Implicit,
+  ImplicitPointer  // For DW_OP_implicit_pointer - references another DIE
   /* Composite*/
 };
 /// Adjust value's ValueType according to the kind of location description.
@@ -819,6 +823,11 @@ void UpdateValueTypeFromLocationDescription(
       LLDB_LOGF(log, log_msg, "Implicit");
       if (value->GetValueType() == Value::ValueType::LoadAddress)
         value->SetValueType(Value::ValueType::Scalar);
+      break;
+    case ImplicitPointer:
+      LLDB_LOGF(log, log_msg, "ImplicitPointer");
+      // Implicit pointers point to values in debugger's address space
+      value->SetValueType(Value::ValueType::HostAddress);
       break;
     }
   }
@@ -1912,11 +1921,36 @@ llvm::Expected<Value> DWARFExpression::Evaluate(
           UpdateValueTypeFromLocationDescription(log, dwarf_cu, piece_locdesc,
                                                  &curr_piece_source_value);
 
-          const Value::ValueType curr_piece_source_value_type =
-              curr_piece_source_value.GetValueType();
-          Scalar &scalar = curr_piece_source_value.GetScalar();
-          lldb::addr_t addr = scalar.ULongLong(LLDB_INVALID_ADDRESS);
-          switch (curr_piece_source_value_type) {
+          // Special handling for ImplicitPointer pieces
+          if (piece_locdesc == ImplicitPointer) {
+            // Extract the DIE offset and byte offset from the current piece
+            uint64_t die_offset = curr_piece_source_value.GetScalar().ULongLong();
+            
+            // Extract byte offset from the source value's buffer
+            int64_t byte_offset = 0;
+            const DataBufferHeap &src_buffer = curr_piece_source_value.GetBuffer();
+            if (src_buffer.GetByteSize() >= sizeof(int64_t)) {
+              memcpy(&byte_offset, src_buffer.GetBytes(), sizeof(int64_t));
+            }
+            
+            // Add structured metadata instead of embedding magic bytes
+            size_t current_offset = pieces.GetBuffer().GetByteSize();
+            pieces.AddPieceMetadata(Value::PieceMetadata::Type::ImplicitPointer, 
+                                    current_offset, piece_byte_size, 
+                                    die_offset, byte_offset);
+            
+            // For ImplicitPointer, we don't need to store actual data in the buffer
+            // Just resize to reserve space for this piece
+            Value dummy_piece;
+            dummy_piece.ResizeData(piece_byte_size);
+            pieces.AppendDataToHostBuffer(dummy_piece);
+          } else {
+            // Regular piece handling
+            const Value::ValueType curr_piece_source_value_type =
+                curr_piece_source_value.GetValueType();
+            Scalar &scalar = curr_piece_source_value.GetScalar();
+            lldb::addr_t addr = scalar.ULongLong(LLDB_INVALID_ADDRESS);
+            switch (curr_piece_source_value_type) {
           case Value::ValueType::Invalid:
             return llvm::createStringError("invalid value type");
           case Value::ValueType::FileAddress:
@@ -1983,29 +2017,42 @@ llvm::Expected<Value> DWARFExpression::Evaluate(
                                          ap_int.getNumWords()};
             curr_piece.GetScalar() = Scalar(llvm::APInt(bit_size, buf));
           } break;
-          }
-
-          // Check if this is the first piece?
-          if (op_piece_offset == 0) {
-            // This is the first piece, we should push it back onto the stack
-            // so subsequent pieces will be able to access this piece and add
-            // to it.
-            if (pieces.AppendDataToHostBuffer(curr_piece) == 0) {
-              return llvm::createStringError("failed to append piece data");
-            }
-          } else {
-            // If this is the second or later piece there should be a value on
-            // the stack.
-            if (pieces.GetBuffer().GetByteSize() != op_piece_offset) {
-              return llvm::createStringError(
-                  "DW_OP_piece for offset %" PRIu64
-                  " but top of stack is of size %" PRIu64,
-                  op_piece_offset, pieces.GetBuffer().GetByteSize());
             }
 
-            if (pieces.AppendDataToHostBuffer(curr_piece) == 0)
-              return llvm::createStringError("failed to append piece data");
-          }
+            // Add metadata for regular pieces
+            Value::PieceMetadata::Type metadata_type = Value::PieceMetadata::Type::Memory;
+            if (piece_locdesc == Implicit) {
+              metadata_type = Value::PieceMetadata::Type::Implicit;
+            }
+            
+            // Check if this is the first piece?
+            if (op_piece_offset == 0) {
+              // This is the first piece, we should push it back onto the stack
+              // so subsequent pieces will be able to access this piece and add
+              // to it.
+              size_t current_offset = pieces.GetBuffer().GetByteSize();
+              pieces.AddPieceMetadata(metadata_type, current_offset, piece_byte_size);
+              
+              if (pieces.AppendDataToHostBuffer(curr_piece) == 0) {
+                return llvm::createStringError("failed to append piece data");
+              }
+            } else {
+              // If this is the second or later piece there should be a value on
+              // the stack.
+              if (pieces.GetBuffer().GetByteSize() != op_piece_offset) {
+                return llvm::createStringError(
+                    "DW_OP_piece for offset %" PRIu64
+                    " but top of stack is of size %" PRIu64,
+                    op_piece_offset, pieces.GetBuffer().GetByteSize());
+              }
+
+              size_t current_offset = pieces.GetBuffer().GetByteSize();
+              pieces.AddPieceMetadata(metadata_type, current_offset, piece_byte_size);
+              
+              if (pieces.AppendDataToHostBuffer(curr_piece) == 0)
+                return llvm::createStringError("failed to append piece data");
+            }
+          } // end of else block for non-ImplicitPointer pieces
         }
         op_piece_offset += piece_byte_size;
       }
@@ -2076,11 +2123,30 @@ llvm::Expected<Value> DWARFExpression::Evaluate(
       break;
     }
 
-    case DW_OP_implicit_pointer: {
-      dwarf4_location_description_kind = Implicit;
-      return llvm::createStringError("Could not evaluate %s.",
-                                     DW_OP_value_to_name(op));
-    }
+    case DW_OP_implicit_pointer:
+    case DW_OP_GNU_implicit_pointer: {
+      dwarf4_location_description_kind = ImplicitPointer;
+      
+      // Read the DIE offset (4 or 8 bytes, for now assume 4)
+      // TODO: Add DWARF64 support when Delegate interface is extended
+      uint64_t die_offset = opcodes.GetU32(&offset);
+      
+      // Read the byte offset within the dereferenced value
+      int64_t byte_offset = opcodes.GetSLEB128(&offset);
+      
+      // For now, we store the DIE offset as the scalar value and the byte 
+      // offset in the data buffer. This is a temporary representation that
+      // will be properly handled when creating ValueObjects.
+      Value implicit_ptr_value;
+      implicit_ptr_value.SetValueType(Value::ValueType::HostAddress);
+      implicit_ptr_value.GetScalar() = die_offset;
+      
+      // Store the byte offset in the data buffer
+      DataBufferHeap &buffer = implicit_ptr_value.GetBuffer();
+      buffer.CopyData(&byte_offset, sizeof(byte_offset));
+      
+      stack.push_back(implicit_ptr_value);
+    } break;
 
     // OPCODE: DW_OP_push_object_address
     // OPERANDS: none

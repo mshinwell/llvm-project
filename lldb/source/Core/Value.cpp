@@ -32,6 +32,8 @@
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-types.h"
 
+#include <cstring>
+
 #include <memory>
 #include <optional>
 #include <string>
@@ -641,6 +643,24 @@ void Value::Clear() {
   m_context = nullptr;
   m_context_type = ContextType::Invalid;
   m_data_buffer.Clear();
+  m_piece_metadata.clear();
+}
+
+bool Value::ContainsImplicitPointer(uint64_t &die_offset, int64_t &byte_offset) const {
+  // Check the structured metadata for ImplicitPointer pieces
+  for (const auto& piece : m_piece_metadata) {
+    if (piece.type == PieceMetadata::Type::ImplicitPointer) {
+      die_offset = piece.die_offset;
+      byte_offset = piece.byte_offset;
+      return true;
+    }
+  }
+  return false;
+}
+
+void Value::AddPieceMetadata(PieceMetadata::Type type, size_t offset, size_t size,
+                             uint64_t die_offset, int64_t byte_offset) {
+  m_piece_metadata.emplace_back(type, offset, size, die_offset, byte_offset);
 }
 
 const char *Value::GetValueTypeAsCString(ValueType value_type) {

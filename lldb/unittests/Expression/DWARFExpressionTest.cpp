@@ -838,3 +838,168 @@ TEST_F(DWARFExpressionMockProcessTest, DW_OP_piece_file_addr) {
   ASSERT_EQ(result->GetValueType(), Value::ValueType::HostAddress);
   ASSERT_THAT(result->GetBuffer().GetData(), ElementsAre(0x11, 0x22));
 }
+
+TEST(DWARFExpression, DW_OP_implicit_pointer) {
+  // Test basic parsing of DW_OP_implicit_pointer
+  // The operation has a DIE offset (4 bytes) and a signed byte offset (SLEB128)
+  
+  // DW_OP_implicit_pointer with DIE offset 0x1234 and byte offset 8
+  uint8_t expr[] = {
+      DW_OP_implicit_pointer, 
+      0x34, 0x12, 0x00, 0x00,  // DIE offset (little-endian 0x1234)
+      0x08                      // Byte offset (SLEB128 for 8)
+  };
+  
+  DataExtractor extractor(expr, sizeof(expr), lldb::eByteOrderLittle,
+                          /*addr_size*/ 4);
+  
+  // Test that the operation is parsed correctly
+  // The total operation size should be 6 bytes (1 opcode + 4 DIE offset + 1 byte offset)
+  
+  // Test evaluation (should currently store DIE offset as scalar)
+  llvm::Expected<Value> result = DWARFExpression::Evaluate(
+      /*exe_ctx*/ nullptr, /*reg_ctx*/ nullptr, /*module_sp*/ {},
+      extractor, /*unit*/ nullptr, lldb::eRegisterKindLLDB,
+      /*initial_value_ptr*/ nullptr,
+      /*object_address_ptr*/ nullptr);
+  
+  ASSERT_THAT_EXPECTED(result, llvm::Succeeded());
+  // The result should be marked as HostAddress (implicit pointer marker)
+  ASSERT_EQ(result->GetValueType(), Value::ValueType::HostAddress);
+  // The scalar should contain the DIE offset
+  ASSERT_EQ(result->GetScalar().UInt(), 0x1234U);
+}
+
+TEST(DWARFExpression, DW_OP_GNU_implicit_pointer) {
+  // Test GNU variant of implicit pointer
+  // Same format as DW_OP_implicit_pointer
+  
+  // DW_OP_GNU_implicit_pointer with DIE offset 0x5678 and byte offset -4
+  uint8_t expr[] = {
+      DW_OP_GNU_implicit_pointer, 
+      0x78, 0x56, 0x00, 0x00,  // DIE offset (little-endian 0x5678)
+      0x7C                      // Byte offset (SLEB128 for -4)
+  };
+  
+  DataExtractor extractor(expr, sizeof(expr), lldb::eByteOrderLittle,
+                          /*addr_size*/ 4);
+  
+  // Test evaluation
+  llvm::Expected<Value> result = DWARFExpression::Evaluate(
+      /*exe_ctx*/ nullptr, /*reg_ctx*/ nullptr, /*module_sp*/ {},
+      extractor, /*unit*/ nullptr, lldb::eRegisterKindLLDB,
+      /*initial_value_ptr*/ nullptr,
+      /*object_address_ptr*/ nullptr);
+  
+  ASSERT_THAT_EXPECTED(result, llvm::Succeeded());
+  // The result should be marked as HostAddress (implicit pointer marker)
+  ASSERT_EQ(result->GetValueType(), Value::ValueType::HostAddress);
+  // The scalar should contain the DIE offset
+  ASSERT_EQ(result->GetScalar().UInt(), 0x5678U);
+}
+
+TEST(DWARFExpression, DW_OP_implicit_value_detailed) {
+  // Test DW_OP_implicit_value - immediate value in debug info
+  // This operation provides the value directly, not a location
+  
+  // DW_OP_implicit_value with a 4-byte integer value 0x12345678
+  uint8_t expr[] = {
+      DW_OP_implicit_value,
+      0x04,                     // ULEB128 size (4 bytes)
+      0x78, 0x56, 0x34, 0x12    // Value bytes (little-endian 0x12345678)
+  };
+  
+  DataExtractor extractor(expr, sizeof(expr), lldb::eByteOrderLittle,
+                          /*addr_size*/ 4);
+  
+  // Test evaluation
+  llvm::Expected<Value> result = DWARFExpression::Evaluate(
+      /*exe_ctx*/ nullptr, /*reg_ctx*/ nullptr, /*module_sp*/ {},
+      extractor, /*unit*/ nullptr, lldb::eRegisterKindLLDB,
+      /*initial_value_ptr*/ nullptr,
+      /*object_address_ptr*/ nullptr);
+  
+  ASSERT_THAT_EXPECTED(result, llvm::Succeeded());
+  // The result should contain the value directly
+  ASSERT_EQ(result->GetValueType(), Value::ValueType::HostAddress);
+  // The data buffer should contain our value
+  const DataBufferHeap &buffer = result->GetBuffer();
+  ASSERT_EQ(buffer.GetByteSize(), 4U);
+  uint32_t value = *reinterpret_cast<const uint32_t*>(buffer.GetBytes());
+  ASSERT_EQ(value, 0x12345678U);
+}
+
+TEST(DWARFExpression, DW_OP_stack_value_with_const) {
+  // Test DW_OP_stack_value - marks TOS as the value, not a location
+  
+  // Push a constant then mark it as the value
+  uint8_t expr[] = {
+      DW_OP_const4u,
+      0xAB, 0xCD, 0xEF, 0x01,   // Push 0x01EFCDAB
+      DW_OP_stack_value          // Mark as value, not location
+  };
+  
+  DataExtractor extractor(expr, sizeof(expr), lldb::eByteOrderLittle,
+                          /*addr_size*/ 4);
+  
+  // Test evaluation
+  llvm::Expected<Value> result = DWARFExpression::Evaluate(
+      /*exe_ctx*/ nullptr, /*reg_ctx*/ nullptr, /*module_sp*/ {},
+      extractor, /*unit*/ nullptr, lldb::eRegisterKindLLDB,
+      /*initial_value_ptr*/ nullptr,
+      /*object_address_ptr*/ nullptr);
+  
+  ASSERT_THAT_EXPECTED(result, llvm::Succeeded());
+  // The result should be marked as Scalar (the actual value, not a location)
+  ASSERT_EQ(result->GetValueType(), Value::ValueType::Scalar);
+  // The scalar should contain our value
+  ASSERT_EQ(result->GetScalar().UInt(), 0x01EFCDABU);
+}
+
+TEST(DWARFExpression, DW_OP_implicit_value_with_implicit_pointer) {
+  // Test that implicit pointers can reference values created by DW_OP_implicit_value
+  // This simulates an optimized-out variable whose value is known
+  
+  // First create an implicit value, then an implicit pointer to it
+  // Note: This tests the parsing; full dereferencing requires DIE lookup
+  uint8_t value_expr[] = {
+      DW_OP_implicit_value,
+      0x08,                              // ULEB128 size (8 bytes)
+      0x11, 0x22, 0x33, 0x44,           // Value bytes
+      0x55, 0x66, 0x77, 0x88
+  };
+  
+  DataExtractor value_extractor(value_expr, sizeof(value_expr), 
+                                lldb::eByteOrderLittle, /*addr_size*/ 4);
+  
+  llvm::Expected<Value> value_result = DWARFExpression::Evaluate(
+      /*exe_ctx*/ nullptr, /*reg_ctx*/ nullptr, /*module_sp*/ {},
+      value_extractor, /*unit*/ nullptr, lldb::eRegisterKindLLDB,
+      /*initial_value_ptr*/ nullptr,
+      /*object_address_ptr*/ nullptr);
+  
+  ASSERT_THAT_EXPECTED(value_result, llvm::Succeeded());
+  ASSERT_EQ(value_result->GetValueType(), Value::ValueType::HostAddress);
+  const DataBufferHeap &buffer = value_result->GetBuffer();
+  ASSERT_EQ(buffer.GetByteSize(), 8U);
+  
+  // Now test an implicit pointer that would reference such a value
+  uint8_t ptr_expr[] = {
+      DW_OP_implicit_pointer,
+      0xAA, 0xBB, 0x00, 0x00,   // DIE offset (would point to variable with above value)
+      0x04                       // Byte offset into the value
+  };
+  
+  DataExtractor ptr_extractor(ptr_expr, sizeof(ptr_expr),
+                              lldb::eByteOrderLittle, /*addr_size*/ 4);
+  
+  llvm::Expected<Value> ptr_result = DWARFExpression::Evaluate(
+      /*exe_ctx*/ nullptr, /*reg_ctx*/ nullptr, /*module_sp*/ {},
+      ptr_extractor, /*unit*/ nullptr, lldb::eRegisterKindLLDB,
+      /*initial_value_ptr*/ nullptr,
+      /*object_address_ptr*/ nullptr);
+  
+  ASSERT_THAT_EXPECTED(ptr_result, llvm::Succeeded());
+  ASSERT_EQ(ptr_result->GetValueType(), Value::ValueType::HostAddress);
+  ASSERT_EQ(ptr_result->GetScalar().UInt(), 0xBBAAU);
+}

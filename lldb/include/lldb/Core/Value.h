@@ -149,6 +149,37 @@ public:
 
   static ValueType GetValueTypeFromAddressType(AddressType address_type);
 
+  /// Metadata for a piece of a composite value
+  struct PieceMetadata {
+    enum class Type {
+      Memory,      ///< Normal memory/register piece
+      Implicit,    ///< DW_OP_implicit_value piece
+      ImplicitPointer  ///< DW_OP_implicit_pointer piece
+    };
+    
+    Type type;
+    size_t offset;   ///< Offset in the data buffer
+    size_t size;     ///< Size of this piece
+    uint64_t die_offset;  ///< For ImplicitPointer: DIE reference
+    int64_t byte_offset;  ///< For ImplicitPointer: byte offset within DIE
+    
+    PieceMetadata(Type t, size_t off, size_t sz, uint64_t die_off = 0, int64_t byte_off = 0)
+      : type(t), offset(off), size(sz), die_offset(die_off), byte_offset(byte_off) {}
+  };
+
+  /// Check if this Value contains implicit pointer pieces from DW_OP_implicit_pointer
+  /// \param die_offset Output parameter for the DIE offset
+  /// \param byte_offset Output parameter for the byte offset
+  /// \return true if this Value contains implicit pointer metadata
+  bool ContainsImplicitPointer(uint64_t &die_offset, int64_t &byte_offset) const;
+
+  /// Add piece metadata for composite values
+  void AddPieceMetadata(PieceMetadata::Type type, size_t offset, size_t size, 
+                        uint64_t die_offset = 0, int64_t byte_offset = 0);
+
+  /// Get all piece metadata
+  const std::vector<PieceMetadata>& GetPieceMetadata() const { return m_piece_metadata; }
+
 protected:
   /// Represents a value, which can be a scalar, a load address, a file address,
   /// or a host address.
@@ -182,6 +213,7 @@ protected:
   ValueType m_value_type = ValueType::Scalar;
   ContextType m_context_type = ContextType::Invalid;
   DataBufferHeap m_data_buffer;
+  std::vector<PieceMetadata> m_piece_metadata;
 };
 
 class ValueList {

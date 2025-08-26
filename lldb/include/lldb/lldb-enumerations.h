@@ -332,6 +332,7 @@ enum ValueType {
   eValueTypeVariableThreadLocal = 8, ///< thread local storage variable
   eValueTypeVTable = 9,              ///< virtual function table
   eValueTypeVTableEntry = 10, ///< function pointer in virtual function table
+  eValueTypeImplicitPointer = 11, ///< DWARF implicit pointer (optimized out pointer)
 };
 
 /// Token size/granularities for Input Readers.

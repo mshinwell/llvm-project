@@ -45,6 +45,7 @@
 #include "lldb/ValueObject/ValueObjectChild.h"
 #include "lldb/ValueObject/ValueObjectConstResult.h"
 #include "lldb/ValueObject/ValueObjectDynamicValue.h"
+#include "lldb/ValueObject/ValueObjectImplicitPointer.h"
 #include "lldb/ValueObject/ValueObjectMemory.h"
 #include "lldb/ValueObject/ValueObjectSynthetic.h"
 #include "lldb/ValueObject/ValueObjectVTable.h"
@@ -2776,6 +2777,19 @@ ValueObjectSP ValueObject::GetQualifiedRepresentationIfAvailable(
 ValueObjectSP ValueObject::Dereference(Status &error) {
   if (m_deref_valobj)
     return m_deref_valobj->GetSP();
+
+  // Check if this value contains implicit pointer pieces from DW_OP_implicit_pointer
+  uint64_t die_offset;
+  int64_t byte_offset;
+  if (GetCompilerType().IsPointerType() && 
+      m_value.ContainsImplicitPointer(die_offset, byte_offset)) {
+    
+    ExecutionContext exe_ctx(GetExecutionContextRef());
+    
+    // Create a ValueObjectImplicitPointer to handle the dereference
+    return ValueObjectImplicitPointer::Create(
+        exe_ctx, GetCompilerType(), GetName(), die_offset, byte_offset);
+  }
 
   std::string deref_name_str;
   uint32_t deref_byte_size = 0;
