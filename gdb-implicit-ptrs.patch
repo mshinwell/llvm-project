@@ -1,0 +1,2258 @@
+commit 8cf6f0b103e62f41f7cebe50f959a8c15986bd8e
+Author: Tom Tromey <tromey@redhat.com>
+Date:   Mon Nov 29 21:18:16 2010 +0000
+
+    gdb
+            * opencl-lang.c (lval_func_check_synthetic_pointer): New
+            function.
+            * value.h (struct lval_funcs) <indirect, check_synthetic_pointer>:
+            New fields.
+            (value_bits_synthetic_pointer): Declare.
+            * value.c (value_bits_synthetic_pointer): New function.
+            * valprint.c (valprint_check_validity): Handle synthetic
+            pointers.
+            * valops.c (value_ind): Use new 'indirect' lval_funcs method.
+            * valarith.c (value_ptradd): Use set_value_component_location.
+            * p-valprint.c (pascal_object_print_value_fields): Handle
+            synthetic pointers.
+            * jv-valprint.c (java_print_value_fields): Handle synthetic
+            pointers.
+            * dwarf2read.c (dwarf_stack_op_name): Add
+            DW_OP_GNU_implicit_pointer.
+            (dwarf2_fetch_die_location_block): Add get_frame_pc, baton
+            arguments.  Handle location lists.
+            (fill_in_loclist_baton): New function.
+            (dwarf2_symbol_mark_computed): Use it.
+            * dwarf2loc.h (dwarf2_find_location_expression): Declare.
+            (dwarf2_fetch_die_location_block): Add get_frame_pc, baton
+            arguments.
+            * dwarf2loc.c (dwarf2_find_location_expression): Rename from
+            find_location_expression.  No longer static.  Update all callers.
+            (dwarf_expr_frame_pc): New function.
+            (per_cu_dwarf_call): Add get_frame_pc, baton arguments.  Update
+            all callers.
+            (struct piece_closure) <per_cu>: New field.
+            (allocate_piece_closure): Add per_cu argument.
+            (read_pieced_value): Handle DWARF_VALUE_IMPLICIT_POINTER.
+            (check_pieced_value_bits): Remove validity argument, add check_for
+            argument.  Handle DWARF_VALUE_IMPLICIT_POINTER.
+            (check_pieced_value_validity, check_pieced_value_invalid):
+            Update.
+            (check_pieced_synthetic_pointer): New function.
+            (get_frame_address_in_block_wrapper): New function.
+            (indirect_pieced_value): New function.
+            (pieced_value_funcs): Update.
+            (invalid_synthetic_pointer): New function.
+            (dwarf2_evaluate_loc_desc_full): Rename from
+            dwarf2_evaluate_loc_desc.  Add byte_offset argument.
+            (dwarf2_evaluate_loc_desc): Rewrite.
+            (dwarf2_loc_desc_needs_frame): Set new field on context.
+            (get_ax_pc): New function.
+            (disassemble_dwarf_expression): Handle
+            DW_OP_GNU_implicit_pointer.
+            * dwarf2expr.h (enum dwarf_value_location)
+            <DWARF_VALUE_IMPLICIT_POINTER>: New constant.
+            (struct dwarf_expr_context) <get_frame_pc>: New field.
+            (struct dwarf_expr_piece) <v.ptr>: New field.
+            * dwarf2expr.c (add_piece): Handle DWARF_VALUE_IMPLICIT_POINTER.
+            (execute_stack_op): Handle DW_OP_GNU_implicit_pointer.
+            * dwarf2-frame.c (no_get_frame_pc): New function.
+            (execute_stack_op): Set new field on context.
+            * cp-valprint.c (cp_print_value_fields): Handle synthetic
+            pointers.
+    gdb/testsuite
+            * gdb.dwarf2/implptr.exp: New file.
+            * gdb.dwarf2/implptr.c: New file.
+            * gdb.dwarf2/implptr.S: New file.
+
+diff --git a/gdb/ChangeLog b/gdb/ChangeLog
+index 51961a3952f..d5a283bae66 100644
+--- a/gdb/ChangeLog
++++ b/gdb/ChangeLog
+@@ -1,3 +1,63 @@
++2010-11-29  Tom Tromey  <tromey@redhat.com>
++
++	* opencl-lang.c (lval_func_check_synthetic_pointer): New
++	function.
++	* value.h (struct lval_funcs) <indirect, check_synthetic_pointer>:
++	New fields.
++	(value_bits_synthetic_pointer): Declare.
++	* value.c (value_bits_synthetic_pointer): New function.
++	* valprint.c (valprint_check_validity): Handle synthetic
++	pointers.
++	* valops.c (value_ind): Use new 'indirect' lval_funcs method.
++	* valarith.c (value_ptradd): Use set_value_component_location.
++	* p-valprint.c (pascal_object_print_value_fields): Handle
++	synthetic pointers.
++	* jv-valprint.c (java_print_value_fields): Handle synthetic
++	pointers.
++	* dwarf2read.c (dwarf_stack_op_name): Add
++	DW_OP_GNU_implicit_pointer.
++	(dwarf2_fetch_die_location_block): Add get_frame_pc, baton
++	arguments.  Handle location lists.
++	(fill_in_loclist_baton): New function.
++	(dwarf2_symbol_mark_computed): Use it.
++	* dwarf2loc.h (dwarf2_find_location_expression): Declare.
++	(dwarf2_fetch_die_location_block): Add get_frame_pc, baton
++	arguments.
++	* dwarf2loc.c (dwarf2_find_location_expression): Rename from
++	find_location_expression.  No longer static.  Update all callers.
++	(dwarf_expr_frame_pc): New function.
++	(per_cu_dwarf_call): Add get_frame_pc, baton arguments.  Update
++	all callers.
++	(struct piece_closure) <per_cu>: New field.
++	(allocate_piece_closure): Add per_cu argument.
++	(read_pieced_value): Handle DWARF_VALUE_IMPLICIT_POINTER.
++	(check_pieced_value_bits): Remove validity argument, add check_for
++	argument.  Handle DWARF_VALUE_IMPLICIT_POINTER.
++	(check_pieced_value_validity, check_pieced_value_invalid):
++	Update.
++	(check_pieced_synthetic_pointer): New function.
++	(get_frame_address_in_block_wrapper): New function.
++	(indirect_pieced_value): New function.
++	(pieced_value_funcs): Update.
++	(invalid_synthetic_pointer): New function.
++	(dwarf2_evaluate_loc_desc_full): Rename from
++	dwarf2_evaluate_loc_desc.  Add byte_offset argument.
++	(dwarf2_evaluate_loc_desc): Rewrite.
++	(dwarf2_loc_desc_needs_frame): Set new field on context.
++	(get_ax_pc): New function.
++	(disassemble_dwarf_expression): Handle
++	DW_OP_GNU_implicit_pointer.
++	* dwarf2expr.h (enum dwarf_value_location)
++	<DWARF_VALUE_IMPLICIT_POINTER>: New constant.
++	(struct dwarf_expr_context) <get_frame_pc>: New field.
++	(struct dwarf_expr_piece) <v.ptr>: New field.
++	* dwarf2expr.c (add_piece): Handle DWARF_VALUE_IMPLICIT_POINTER.
++	(execute_stack_op): Handle DW_OP_GNU_implicit_pointer.
++	* dwarf2-frame.c (no_get_frame_pc): New function.
++	(execute_stack_op): Set new field on context.
++	* cp-valprint.c (cp_print_value_fields): Handle synthetic
++	pointers.
++
+ 2010-11-29  Phil Muldoon  <pmuldoon@redhat.com>
+ 
+         PR python/12199
+diff --git a/gdb/cp-valprint.c b/gdb/cp-valprint.c
+index 5f47ec4d910..e65c12bbd7f 100644
+--- a/gdb/cp-valprint.c
++++ b/gdb/cp-valprint.c
+@@ -289,6 +289,14 @@ cp_print_value_fields (struct type *type, struct type *real_type,
+ 		{
+ 		  fputs_filtered ("<optimized out or zero length>", stream);
+ 		}
++	      else if (value_bits_synthetic_pointer (val,
++						     TYPE_FIELD_BITPOS (type,
++									i),
++						     TYPE_FIELD_BITSIZE (type,
++									 i)))
++		{
++		  fputs_filtered (_("<synthetic pointer>"), stream);
++		}
+ 	      else if (!value_bits_valid (val, TYPE_FIELD_BITPOS (type, i),
+ 					  TYPE_FIELD_BITSIZE (type, i)))
+ 		{
+diff --git a/gdb/dwarf2-frame.c b/gdb/dwarf2-frame.c
+index d7d8b9734e7..d09a3772bd1 100644
+--- a/gdb/dwarf2-frame.c
++++ b/gdb/dwarf2-frame.c
+@@ -325,6 +325,15 @@ no_get_frame_cfa (void *baton)
+ 		  _("Support for DW_OP_call_frame_cfa is unimplemented"));
+ }
+ 
++/* Helper function for execute_stack_op.  */
++
++static CORE_ADDR
++no_get_frame_pc (void *baton)
++{
++  internal_error (__FILE__, __LINE__,
++		  _("Support for DW_OP_GNU_implicit_pointer is unimplemented"));
++}
++
+ static CORE_ADDR
+ no_get_tls_address (void *baton, CORE_ADDR offset)
+ {
+@@ -391,6 +400,7 @@ execute_stack_op (const gdb_byte *exp, ULONGEST len, int addr_size,
+   ctx->read_mem = read_mem;
+   ctx->get_frame_base = no_get_frame_base;
+   ctx->get_frame_cfa = no_get_frame_cfa;
++  ctx->get_frame_pc = no_get_frame_pc;
+   ctx->get_tls_address = no_get_tls_address;
+   ctx->dwarf_call = no_dwarf_call;
+ 
+diff --git a/gdb/dwarf2expr.c b/gdb/dwarf2expr.c
+index b9ae108c5ff..29bfcf40884 100644
+--- a/gdb/dwarf2expr.c
++++ b/gdb/dwarf2expr.c
+@@ -233,6 +233,11 @@ add_piece (struct dwarf_expr_context *ctx, ULONGEST size, ULONGEST offset)
+       p->v.mem.addr = dwarf_expr_fetch_address (ctx, 0);
+       p->v.mem.in_stack_memory = dwarf_expr_fetch_in_stack_memory (ctx, 0);
+     }
++  else if (p->location == DWARF_VALUE_IMPLICIT_POINTER)
++    {
++      p->v.ptr.die = ctx->len;
++      p->v.ptr.offset = (LONGEST) dwarf_expr_fetch (ctx, 0);
++    }
+   else
+     {
+       p->v.value = dwarf_expr_fetch (ctx, 0);
+@@ -527,6 +532,26 @@ execute_stack_op (struct dwarf_expr_context *ctx,
+ 	  dwarf_expr_require_composition (op_ptr, op_end, "DW_OP_stack_value");
+ 	  goto no_push;
+ 
++	case DW_OP_GNU_implicit_pointer:
++	  {
++	    ULONGEST die;
++	    LONGEST len;
++
++	    /* The referred-to DIE.  */
++	    ctx->len = extract_unsigned_integer (op_ptr, ctx->addr_size,
++						 byte_order);
++	    op_ptr += ctx->addr_size;
++
++	    /* The byte offset into the data.  */
++	    op_ptr = read_sleb128 (op_ptr, op_end, &len);
++	    result = (ULONGEST) len;
++
++	    ctx->location = DWARF_VALUE_IMPLICIT_POINTER;
++	    dwarf_expr_require_composition (op_ptr, op_end,
++					    "DW_OP_GNU_implicit_pointer");
++	  }
++	  break;
++
+ 	case DW_OP_breg0:
+ 	case DW_OP_breg1:
+ 	case DW_OP_breg2:
+@@ -884,6 +909,12 @@ execute_stack_op (struct dwarf_expr_context *ctx,
+     no_push:;
+     }
+ 
++  /* To simplify our main caller, if the result is an implicit
++     pointer, then make a pieced value.  This is ok because we can't
++     have implicit pointers in contexts where pieces are invalid.  */
++  if (ctx->location == DWARF_VALUE_IMPLICIT_POINTER)
++    add_piece (ctx, 8 * ctx->addr_size, 0);
++
+   ctx->recursion_depth--;
+   gdb_assert (ctx->recursion_depth >= 0);
+ #undef sign_ext
+diff --git a/gdb/dwarf2expr.h b/gdb/dwarf2expr.h
+index 61b8f003303..68cc667ff9e 100644
+--- a/gdb/dwarf2expr.h
++++ b/gdb/dwarf2expr.h
+@@ -41,7 +41,10 @@ enum dwarf_value_location
+   DWARF_VALUE_LITERAL,
+ 
+   /* The piece was optimized out.  */
+-  DWARF_VALUE_OPTIMIZED_OUT
++  DWARF_VALUE_OPTIMIZED_OUT,
++
++  /* The piece is an implicit pointer.  */
++  DWARF_VALUE_IMPLICIT_POINTER
+ };
+ 
+ /* The dwarf expression stack.  */
+@@ -96,6 +99,9 @@ struct dwarf_expr_context
+   /* Return the CFA for the frame.  */
+   CORE_ADDR (*get_frame_cfa) (void *baton);
+ 
++  /* Return the PC for the frame.  */
++  CORE_ADDR (*get_frame_pc) (void *baton);
++
+   /* Return the thread-local storage address for
+      DW_OP_GNU_push_tls_address.  */
+   CORE_ADDR (*get_tls_address) (void *baton, CORE_ADDR offset);
+@@ -120,8 +126,9 @@ struct dwarf_expr_context
+   /* Location of the value.  */
+   enum dwarf_value_location location;
+ 
+-  /* For VALUE_LITERAL, a the current literal value's length and
+-     data.  */
++  /* For DWARF_VALUE_LITERAL, a the current literal value's length and
++     data.  For DWARF_VALUE_IMPLICIT_POINTER, LEN is the offset of the
++     target DIE.  */
+   ULONGEST len;
+   const gdb_byte *data;
+ 
+@@ -185,6 +192,15 @@ struct dwarf_expr_piece
+       /* The length of the available data.  */
+       ULONGEST length;
+     } literal;
++
++    /* Used for DWARF_VALUE_IMPLICIT_POINTER.  */
++    struct
++    {
++      /* The referent DIE from DW_OP_GNU_implicit_pointer.  */
++      ULONGEST die;
++      /* The byte offset into the resulting data.  */
++      LONGEST offset;
++    } ptr;
+   } v;
+ 
+   /* The length of the piece, in bits.  */
+diff --git a/gdb/dwarf2loc.c b/gdb/dwarf2loc.c
+index b2aecf25339..f0e08c778ed 100644
+--- a/gdb/dwarf2loc.c
++++ b/gdb/dwarf2loc.c
+@@ -48,7 +48,13 @@ static void
+ dwarf_expr_frame_base_1 (struct symbol *framefunc, CORE_ADDR pc,
+ 			 const gdb_byte **start, size_t *length);
+ 
+-/* A helper function for dealing with location lists.  Given a
++static struct value *
++dwarf2_evaluate_loc_desc_full (struct type *type, struct frame_info *frame,
++			       const gdb_byte *data, unsigned short size,
++			       struct dwarf2_per_cu_data *per_cu,
++			       LONGEST byte_offset);
++
++/* A function for dealing with location lists.  Given a
+    symbol baton (BATON) and a pc value (PC), find the appropriate
+    location expression, set *LOCEXPR_LENGTH, and return a pointer
+    to the beginning of the expression.  Returns NULL on failure.
+@@ -56,9 +62,9 @@ dwarf_expr_frame_base_1 (struct symbol *framefunc, CORE_ADDR pc,
+    For now, only return the first matching location expression; there
+    can be more than one in the list.  */
+ 
+-static const gdb_byte *
+-find_location_expression (struct dwarf2_loclist_baton *baton,
+-			  size_t *locexpr_length, CORE_ADDR pc)
++const gdb_byte *
++dwarf2_find_location_expression (struct dwarf2_loclist_baton *baton,
++				 size_t *locexpr_length, CORE_ADDR pc)
+ {
+   CORE_ADDR low, high;
+   const gdb_byte *loc_ptr, *buf_end;
+@@ -79,7 +85,7 @@ find_location_expression (struct dwarf2_loclist_baton *baton,
+   while (1)
+     {
+       if (buf_end - loc_ptr < 2 * addr_size)
+-	error (_("find_location_expression: Corrupted DWARF expression."));
++	error (_("dwarf2_find_location_expression: Corrupted DWARF expression."));
+ 
+       if (signed_addr_p)
+ 	low = extract_signed_integer (loc_ptr, addr_size, byte_order);
+@@ -193,7 +199,7 @@ dwarf_expr_frame_base_1 (struct symbol *framefunc, CORE_ADDR pc,
+       struct dwarf2_loclist_baton *symbaton;
+ 
+       symbaton = SYMBOL_LOCATION_BATON (framefunc);
+-      *start = find_location_expression (symbaton, length, pc);
++      *start = dwarf2_find_location_expression (symbaton, length, pc);
+     }
+   else
+     {
+@@ -225,6 +231,17 @@ dwarf_expr_frame_cfa (void *baton)
+   return dwarf2_frame_cfa (debaton->frame);
+ }
+ 
++/* Helper function for dwarf2_evaluate_loc_desc.  Computes the PC for
++   the frame in BATON.  */
++
++static CORE_ADDR
++dwarf_expr_frame_pc (void *baton)
++{
++  struct dwarf_expr_baton *debaton = (struct dwarf_expr_baton *) baton;
++
++  return get_frame_address_in_block (debaton->frame);
++}
++
+ /* Using the objfile specified in BATON, find the address for the
+    current thread's thread-local storage with offset OFFSET.  */
+ static CORE_ADDR
+@@ -241,11 +258,14 @@ dwarf_expr_tls_address (void *baton, CORE_ADDR offset)
+ 
+ static void
+ per_cu_dwarf_call (struct dwarf_expr_context *ctx, size_t die_offset,
+-		   struct dwarf2_per_cu_data *per_cu)
++		   struct dwarf2_per_cu_data *per_cu,
++		   CORE_ADDR (*get_frame_pc) (void *baton),
++		   void *baton)
+ {
+   struct dwarf2_locexpr_baton block;
+ 
+-  block = dwarf2_fetch_die_location_block (die_offset, per_cu);
++  block = dwarf2_fetch_die_location_block (die_offset, per_cu,
++					   get_frame_pc, baton);
+ 
+   /* DW_OP_call_ref is currently not supported.  */
+   gdb_assert (block.per_cu == per_cu);
+@@ -260,7 +280,8 @@ dwarf_expr_dwarf_call (struct dwarf_expr_context *ctx, size_t die_offset)
+ {
+   struct dwarf_expr_baton *debaton = ctx->baton;
+ 
+-  return per_cu_dwarf_call (ctx, die_offset, debaton->per_cu);
++  return per_cu_dwarf_call (ctx, die_offset, debaton->per_cu,
++			    ctx->get_frame_pc, ctx->baton);
+ }
+ 
+ struct piece_closure
+@@ -268,6 +289,9 @@ struct piece_closure
+   /* Reference count.  */
+   int refc;
+ 
++  /* The CU from which this closure's expression came.  */
++  struct dwarf2_per_cu_data *per_cu;
++
+   /* The number of pieces used to describe this variable.  */
+   int n_pieces;
+ 
+@@ -282,12 +306,14 @@ struct piece_closure
+    PIECES.  */
+ 
+ static struct piece_closure *
+-allocate_piece_closure (int n_pieces, struct dwarf_expr_piece *pieces,
++allocate_piece_closure (struct dwarf2_per_cu_data *per_cu,
++			int n_pieces, struct dwarf_expr_piece *pieces,
+ 			int addr_size)
+ {
+   struct piece_closure *c = XZALLOC (struct piece_closure);
+ 
+   c->refc = 1;
++  c->per_cu = per_cu;
+   c->n_pieces = n_pieces;
+   c->addr_size = addr_size;
+   c->pieces = XCALLOC (n_pieces, struct dwarf_expr_piece);
+@@ -622,6 +648,11 @@ read_pieced_value (struct value *v)
+ 	  }
+ 	  break;
+ 
++	  /* These bits show up as zeros -- but do not cause the value
++	     to be considered optimized-out.  */
++	case DWARF_VALUE_IMPLICIT_POINTER:
++	  break;
++
+ 	case DWARF_VALUE_OPTIMIZED_OUT:
+ 	  set_value_optimized_out (v, 1);
+ 	  break;
+@@ -630,7 +661,8 @@ read_pieced_value (struct value *v)
+ 	  internal_error (__FILE__, __LINE__, _("invalid location type"));
+ 	}
+ 
+-      if (p->location != DWARF_VALUE_OPTIMIZED_OUT)
++      if (p->location != DWARF_VALUE_OPTIMIZED_OUT
++	  && p->location != DWARF_VALUE_IMPLICIT_POINTER)
+ 	copy_bitwise (contents, dest_offset_bits,
+ 		      intermediate_buffer, source_offset_bits % 8,
+ 		      this_size_bits, bits_big_endian);
+@@ -785,13 +817,24 @@ write_pieced_value (struct value *to, struct value *from)
+   do_cleanups (cleanup);
+ }
+ 
++/* A helper function that checks bit validity in a pieced value.
++   CHECK_FOR indicates the kind of validity checking.
++   DWARF_VALUE_MEMORY means to check whether any bit is valid.
++   DWARF_VALUE_OPTIMIZED_OUT means to check whether any bit is
++   optimized out.
++   DWARF_VALUE_IMPLICIT_POINTER means to check whether the bits are an
++   implicit pointer.  */
++
+ static int
+ check_pieced_value_bits (const struct value *value, int bit_offset,
+-			 int bit_length, int validity)
++			 int bit_length,
++			 enum dwarf_value_location check_for)
+ {
+   struct piece_closure *c
+     = (struct piece_closure *) value_computed_closure (value);
+   int i;
++  int validity = (check_for == DWARF_VALUE_MEMORY
++		  || check_for == DWARF_VALUE_IMPLICIT_POINTER);
+ 
+   bit_offset += 8 * value_offset (value);
+   if (value_bitsize (value))
+@@ -816,7 +859,13 @@ check_pieced_value_bits (const struct value *value, int bit_offset,
+       else
+ 	bit_length -= this_size_bits;
+ 
+-      if (p->location == DWARF_VALUE_OPTIMIZED_OUT)
++      if (check_for == DWARF_VALUE_IMPLICIT_POINTER)
++	{
++	  if (p->location != DWARF_VALUE_IMPLICIT_POINTER)
++	    return 0;
++	}
++      else if (p->location == DWARF_VALUE_OPTIMIZED_OUT
++	       || p->location == DWARF_VALUE_IMPLICIT_POINTER)
+ 	{
+ 	  if (validity)
+ 	    return 0;
+@@ -835,14 +884,103 @@ static int
+ check_pieced_value_validity (const struct value *value, int bit_offset,
+ 			     int bit_length)
+ {
+-  return check_pieced_value_bits (value, bit_offset, bit_length, 1);
++  return check_pieced_value_bits (value, bit_offset, bit_length,
++				  DWARF_VALUE_MEMORY);
+ }
+ 
+ static int
+ check_pieced_value_invalid (const struct value *value)
+ {
+   return check_pieced_value_bits (value, 0,
+-				  8 * TYPE_LENGTH (value_type (value)), 0);
++				  8 * TYPE_LENGTH (value_type (value)),
++				  DWARF_VALUE_OPTIMIZED_OUT);
++}
++
++/* An implementation of an lval_funcs method to see whether a value is
++   a synthetic pointer.  */
++
++static int
++check_pieced_synthetic_pointer (const struct value *value, int bit_offset,
++				int bit_length)
++{
++  return check_pieced_value_bits (value, bit_offset, bit_length,
++				  DWARF_VALUE_IMPLICIT_POINTER);
++}
++
++/* A wrapper function for get_frame_address_in_block.  */
++
++static CORE_ADDR
++get_frame_address_in_block_wrapper (void *baton)
++{
++  return get_frame_address_in_block (baton);
++}
++
++/* An implementation of an lval_funcs method to indirect through a
++   pointer.  This handles the synthetic pointer case when needed.  */
++
++static struct value *
++indirect_pieced_value (struct value *value)
++{
++  struct piece_closure *c
++    = (struct piece_closure *) value_computed_closure (value);
++  struct type *type;
++  struct frame_info *frame;
++  struct dwarf2_locexpr_baton baton;
++  int i, bit_offset, bit_length;
++  struct dwarf_expr_piece *piece = NULL;
++  struct value *result;
++  LONGEST byte_offset;
++
++  type = value_type (value);
++  if (TYPE_CODE (type) != TYPE_CODE_PTR)
++    return NULL;
++
++  bit_length = 8 * TYPE_LENGTH (type);
++  bit_offset = 8 * value_offset (value);
++  if (value_bitsize (value))
++    bit_offset += value_bitpos (value);
++
++  for (i = 0; i < c->n_pieces && bit_length > 0; i++)
++    {
++      struct dwarf_expr_piece *p = &c->pieces[i];
++      size_t this_size_bits = p->size;
++
++      if (bit_offset > 0)
++	{
++	  if (bit_offset >= this_size_bits)
++	    {
++	      bit_offset -= this_size_bits;
++	      continue;
++	    }
++
++	  bit_length -= this_size_bits - bit_offset;
++	  bit_offset = 0;
++	}
++      else
++	bit_length -= this_size_bits;
++
++      if (p->location != DWARF_VALUE_IMPLICIT_POINTER)
++	return NULL;
++
++      if (bit_length != 0)
++	error (_("Invalid use of DW_OP_GNU_implicit_pointer"));
++
++      piece = p;
++      break;
++    }
++
++  frame = get_selected_frame (_("No frame selected."));
++  byte_offset = value_as_address (value);
++
++  baton = dwarf2_fetch_die_location_block (piece->v.ptr.die, c->per_cu,
++					   get_frame_address_in_block_wrapper,
++					   frame);
++
++  result = dwarf2_evaluate_loc_desc_full (TYPE_TARGET_TYPE (type), frame,
++					  baton.data, baton.size, baton.per_cu,
++					  byte_offset);
++
++  return result;
+ }
+ 
+ static void *
+@@ -873,18 +1011,31 @@ static struct lval_funcs pieced_value_funcs = {
+   write_pieced_value,
+   check_pieced_value_validity,
+   check_pieced_value_invalid,
++  indirect_pieced_value,
++  check_pieced_synthetic_pointer,
+   copy_pieced_value_closure,
+   free_pieced_value_closure
+ };
+ 
++/* Helper function which throws an error if a synthetic pointer is
++   invalid.  */
++
++static void
++invalid_synthetic_pointer (void)
++{
++  error (_("access outside bounds of object referenced via synthetic pointer"));
++}
++
+ /* Evaluate a location description, starting at DATA and with length
+-   SIZE, to find the current location of variable of TYPE in the context
+-   of FRAME.  */
++   SIZE, to find the current location of variable of TYPE in the
++   context of FRAME.  BYTE_OFFSET is applied after the contents are
++   computed.  */
+ 
+-struct value *
+-dwarf2_evaluate_loc_desc (struct type *type, struct frame_info *frame,
+-			  const gdb_byte *data, unsigned short size,
+-			  struct dwarf2_per_cu_data *per_cu)
++static struct value *
++dwarf2_evaluate_loc_desc_full (struct type *type, struct frame_info *frame,
++			       const gdb_byte *data, unsigned short size,
++			       struct dwarf2_per_cu_data *per_cu,
++			       LONGEST byte_offset)
+ {
+   struct value *retval;
+   struct dwarf_expr_baton baton;
+@@ -892,6 +1043,9 @@ dwarf2_evaluate_loc_desc (struct type *type, struct frame_info *frame,
+   struct cleanup *old_chain;
+   struct objfile *objfile = dwarf2_per_cu_objfile (per_cu);
+ 
++  if (byte_offset < 0)
++    invalid_synthetic_pointer ();
++
+   if (size == 0)
+     {
+       retval = allocate_value (type);
+@@ -914,6 +1068,7 @@ dwarf2_evaluate_loc_desc (struct type *type, struct frame_info *frame,
+   ctx->read_mem = dwarf_expr_read_mem;
+   ctx->get_frame_base = dwarf_expr_frame_base;
+   ctx->get_frame_cfa = dwarf_expr_frame_cfa;
++  ctx->get_frame_pc = dwarf_expr_frame_pc;
+   ctx->get_tls_address = dwarf_expr_tls_address;
+   ctx->dwarf_call = dwarf_expr_dwarf_call;
+ 
+@@ -922,11 +1077,19 @@ dwarf2_evaluate_loc_desc (struct type *type, struct frame_info *frame,
+     {
+       struct piece_closure *c;
+       struct frame_id frame_id = get_frame_id (frame);
++      ULONGEST bit_size = 0;
++      int i;
+ 
+-      c = allocate_piece_closure (ctx->num_pieces, ctx->pieces,
++      for (i = 0; i < ctx->num_pieces; ++i)
++	bit_size += ctx->pieces[i].size;
++      if (8 * (byte_offset + TYPE_LENGTH (type)) > bit_size)
++	invalid_synthetic_pointer ();
++
++      c = allocate_piece_closure (per_cu, ctx->num_pieces, ctx->pieces,
+ 				  ctx->addr_size);
+       retval = allocate_computed_value (type, &pieced_value_funcs, c);
+       VALUE_FRAME_ID (retval) = frame_id;
++      set_value_offset (retval, byte_offset);
+     }
+   else
+     {
+@@ -938,6 +1101,8 @@ dwarf2_evaluate_loc_desc (struct type *type, struct frame_info *frame,
+ 	    ULONGEST dwarf_regnum = dwarf_expr_fetch (ctx, 0);
+ 	    int gdb_regnum = gdbarch_dwarf2_reg_to_regnum (arch, dwarf_regnum);
+ 
++	    if (byte_offset != 0)
++	      error (_("cannot use offset on synthetic pointer to register"));
+ 	    if (gdb_regnum != -1)
+ 	      retval = value_from_register (type, gdb_regnum, frame);
+ 	    else
+@@ -956,39 +1121,59 @@ dwarf2_evaluate_loc_desc (struct type *type, struct frame_info *frame,
+ 	    set_value_lazy (retval, 1);
+ 	    if (in_stack_memory)
+ 	      set_value_stack (retval, 1);
+-	    set_value_address (retval, address);
++	    set_value_address (retval, address + byte_offset);
+ 	  }
+ 	  break;
+ 
+ 	case DWARF_VALUE_STACK:
+ 	  {
+ 	    ULONGEST value = dwarf_expr_fetch (ctx, 0);
+-	    bfd_byte *contents;
++	    bfd_byte *contents, *tem;
+ 	    size_t n = ctx->addr_size;
+ 
++	    if (byte_offset + TYPE_LENGTH (type) > n)
++	      invalid_synthetic_pointer ();
++
++	    tem = alloca (n);
++	    store_unsigned_integer (tem, n,
++				    gdbarch_byte_order (ctx->gdbarch),
++				    value);
++
++	    tem += byte_offset;
++	    n -= byte_offset;
++
+ 	    retval = allocate_value (type);
+ 	    contents = value_contents_raw (retval);
+ 	    if (n > TYPE_LENGTH (type))
+ 	      n = TYPE_LENGTH (type);
+-	    store_unsigned_integer (contents, n,
+-				    gdbarch_byte_order (ctx->gdbarch),
+-				    value);
++	    memcpy (contents, tem, n);
+ 	  }
+ 	  break;
+ 
+ 	case DWARF_VALUE_LITERAL:
+ 	  {
+ 	    bfd_byte *contents;
++	    const bfd_byte *data;
+ 	    size_t n = ctx->len;
+ 
++	    if (byte_offset + TYPE_LENGTH (type) > n)
++	      invalid_synthetic_pointer ();
++
+ 	    retval = allocate_value (type);
+ 	    contents = value_contents_raw (retval);
++
++	    data = ctx->data + byte_offset;
++	    n -= byte_offset;
++
+ 	    if (n > TYPE_LENGTH (type))
+ 	      n = TYPE_LENGTH (type);
+-	    memcpy (contents, ctx->data, n);
++	    memcpy (contents, data, n);
+ 	  }
+ 	  break;
+ 
++	  /* DWARF_VALUE_IMPLICIT_POINTER was converted to a pieced
++	     operation by execute_stack_op.  */
++	case DWARF_VALUE_IMPLICIT_POINTER:
+ 	  /* DWARF_VALUE_OPTIMIZED_OUT can't occur in this context --
+ 	     it can only be encountered when making a piece.  */
+ 	case DWARF_VALUE_OPTIMIZED_OUT:
+@@ -1003,6 +1188,18 @@ dwarf2_evaluate_loc_desc (struct type *type, struct frame_info *frame,
+ 
+   return retval;
+ }
++
++/* The exported interface to dwarf2_evaluate_loc_desc_full; it always
++   passes 0 as the byte_offset.  */
++
++struct value *
++dwarf2_evaluate_loc_desc (struct type *type, struct frame_info *frame,
++			  const gdb_byte *data, unsigned short size,
++			  struct dwarf2_per_cu_data *per_cu)
++{
++  return dwarf2_evaluate_loc_desc_full (type, frame, data, size, per_cu, 0);
++}
++
+ 
+ /* Helper functions and baton for dwarf2_loc_desc_needs_frame.  */
+ 
+@@ -1070,7 +1267,8 @@ needs_frame_dwarf_call (struct dwarf_expr_context *ctx, size_t die_offset)
+ {
+   struct needs_frame_baton *nf_baton = ctx->baton;
+ 
+-  return per_cu_dwarf_call (ctx, die_offset, nf_baton->per_cu);
++  return per_cu_dwarf_call (ctx, die_offset, nf_baton->per_cu,
++			    ctx->get_frame_pc, ctx->baton);
+ }
+ 
+ /* Return non-zero iff the location expression at DATA (length SIZE)
+@@ -1100,6 +1298,7 @@ dwarf2_loc_desc_needs_frame (const gdb_byte *data, unsigned short size,
+   ctx->read_mem = needs_frame_read_mem;
+   ctx->get_frame_base = needs_frame_frame_base;
+   ctx->get_frame_cfa = needs_frame_frame_cfa;
++  ctx->get_frame_pc = needs_frame_frame_cfa;
+   ctx->get_tls_address = needs_frame_tls_address;
+   ctx->dwarf_call = needs_frame_dwarf_call;
+ 
+@@ -1191,6 +1390,16 @@ access_memory (struct gdbarch *arch, struct agent_expr *expr, ULONGEST nbits)
+     }
+ }
+ 
++/* A helper function to return the frame's PC.  */
++
++static CORE_ADDR
++get_ax_pc (void *baton)
++{
++  struct agent_expr *expr = baton;
++
++  return expr->scope;
++}
++
+ /* Compile a DWARF location expression to an agent expression.
+    
+    EXPR is the agent expression we are building.
+@@ -1839,7 +2048,8 @@ compile_dwarf_to_ax (struct agent_expr *expr, struct axs_value *loc,
+ 	    uoffset = extract_unsigned_integer (op_ptr, size, byte_order);
+ 	    op_ptr += size;
+ 
+-	    block = dwarf2_fetch_die_location_block (uoffset, per_cu);
++	    block = dwarf2_fetch_die_location_block (uoffset, per_cu,
++						     get_ax_pc, expr);
+ 
+ 	    /* DW_OP_call_ref is currently not supported.  */
+ 	    gdb_assert (block.per_cu == per_cu);
+@@ -2305,6 +2515,20 @@ disassemble_dwarf_expression (struct ui_file *stream,
+ 			      pulongest (ul), pulongest (offset));
+ 	  }
+ 	  break;
++
++	case DW_OP_GNU_implicit_pointer:
++	  {
++	    ul = extract_unsigned_integer (data, offset_size,
++					   gdbarch_byte_order (arch));
++	    data += offset_size;
++
++	    data = read_sleb128 (data, end, &l);
++
++	    fprintf_filtered (stream, " DIE %s offset %s",
++			      phex_nz (ul, offset_size),
++			      plongest (l));
++	  }
++	  break;
+ 	}
+ 
+       fprintf_filtered (stream, "\n");
+@@ -2456,10 +2680,9 @@ loclist_read_variable (struct symbol *symbol, struct frame_info *frame)
+   struct value *val;
+   const gdb_byte *data;
+   size_t size;
++  CORE_ADDR pc = frame ? get_frame_address_in_block (frame) : 0;
+ 
+-  data = find_location_expression (dlbaton, &size,
+-				   frame ? get_frame_address_in_block (frame)
+-				   : 0);
++  data = dwarf2_find_location_expression (dlbaton, &size, pc);
+   if (data == NULL)
+     {
+       val = allocate_value (SYMBOL_TYPE (symbol));
+@@ -2579,7 +2802,7 @@ loclist_tracepoint_var_ref (struct symbol *symbol, struct gdbarch *gdbarch,
+   size_t size;
+   unsigned int addr_size = dwarf2_per_cu_addr_size (dlbaton->per_cu);
+ 
+-  data = find_location_expression (dlbaton, &size, ax->scope);
++  data = dwarf2_find_location_expression (dlbaton, &size, ax->scope);
+   if (data == NULL || size == 0)
+     value->optimized_out = 1;
+   else
+diff --git a/gdb/dwarf2loc.h b/gdb/dwarf2loc.h
+index a2cfe7fa955..e94346cea5f 100644
+--- a/gdb/dwarf2loc.h
++++ b/gdb/dwarf2loc.h
+@@ -24,6 +24,7 @@
+ struct symbol_computed_ops;
+ struct objfile;
+ struct dwarf2_per_cu_data;
++struct dwarf2_loclist_baton;
+ 
+ /* This header is private to the DWARF-2 reader.  It is shared between
+    dwarf2read.c and dwarf2loc.c.  */
+@@ -45,8 +46,16 @@ int dwarf2_per_cu_offset_size (struct dwarf2_per_cu_data *cu);
+    offset in the parent objfile.  */
+ CORE_ADDR dwarf2_per_cu_text_offset (struct dwarf2_per_cu_data *cu);
+ 
++/* Find a particular location expression from a location list.  */
++const gdb_byte *dwarf2_find_location_expression
++  (struct dwarf2_loclist_baton *baton,
++   size_t *locexpr_length,
++   CORE_ADDR pc);
++
+ struct dwarf2_locexpr_baton dwarf2_fetch_die_location_block
+-  (unsigned int offset, struct dwarf2_per_cu_data *per_cu);
++  (unsigned int offset, struct dwarf2_per_cu_data *per_cu,
++   CORE_ADDR (*get_frame_pc) (void *baton),
++   void *baton);
+ 
+ /* Evaluate a location description, starting at DATA and with length
+    SIZE, to find the current location of variable of TYPE in the context
+diff --git a/gdb/dwarf2read.c b/gdb/dwarf2read.c
+index ad8b109f1fa..6087c3b3ac2 100644
+--- a/gdb/dwarf2read.c
++++ b/gdb/dwarf2read.c
+@@ -1221,6 +1221,10 @@ static int attr_form_is_section_offset (struct attribute *);
+ 
+ static int attr_form_is_constant (struct attribute *);
+ 
++static void fill_in_loclist_baton (struct dwarf2_cu *cu,
++				   struct dwarf2_loclist_baton *baton,
++				   struct attribute *attr);
++
+ static void dwarf2_symbol_mark_computed (struct attribute *attr,
+ 					 struct symbol *sym,
+ 					 struct dwarf2_cu *cu);
+@@ -12572,6 +12576,8 @@ dwarf_stack_op_name (unsigned op, int def)
+       return "DW_OP_GNU_push_tls_address";
+     case DW_OP_GNU_uninit:
+       return "DW_OP_GNU_uninit";
++    case DW_OP_GNU_implicit_pointer:
++      return "DW_OP_GNU_implicit_pointer";
+     default:
+       return def ? "OP_<unknown>" : NULL;
+     }
+@@ -13076,13 +13082,17 @@ follow_die_ref (struct die_info *src_die, struct attribute *attr,
+ 
+ struct dwarf2_locexpr_baton
+ dwarf2_fetch_die_location_block (unsigned int offset,
+-				 struct dwarf2_per_cu_data *per_cu)
++				 struct dwarf2_per_cu_data *per_cu,
++				 CORE_ADDR (*get_frame_pc) (void *baton),
++				 void *baton)
+ {
+   struct dwarf2_cu *cu = per_cu->cu;
+   struct die_info *die;
+   struct attribute *attr;
+   struct dwarf2_locexpr_baton retval;
+ 
++  dw2_setup (per_cu->objfile);
++
+   die = follow_die_offset (offset, &cu);
+   if (!die)
+     error (_("Dwarf Error: Cannot find DIE at 0x%x referenced in module %s"),
+@@ -13096,6 +13106,18 @@ dwarf2_fetch_die_location_block (unsigned int offset,
+       retval.data = NULL;
+       retval.size = 0;
+     }
++  else if (attr_form_is_section_offset (attr))
++    {
++      struct dwarf2_loclist_baton loclist_baton;
++      CORE_ADDR pc = (*get_frame_pc) (baton);
++      size_t size;
++
++      fill_in_loclist_baton (cu, &loclist_baton, attr);
++
++      retval.data = dwarf2_find_location_expression (&loclist_baton,
++						     &size, pc);
++      retval.size = size;
++    }
+   else
+     {
+       if (!attr_form_is_block (attr))
+@@ -14119,6 +14141,25 @@ attr_form_is_constant (struct attribute *attr)
+     }
+ }
+ 
++/* A helper function that fills in a dwarf2_loclist_baton.  */
++
++static void
++fill_in_loclist_baton (struct dwarf2_cu *cu,
++		       struct dwarf2_loclist_baton *baton,
++		       struct attribute *attr)
++{
++  dwarf2_read_section (dwarf2_per_objfile->objfile,
++		       &dwarf2_per_objfile->loc);
++
++  baton->per_cu = cu->per_cu;
++  gdb_assert (baton->per_cu);
++  /* We don't know how long the location list is, but make sure we
++     don't run off the edge of the section.  */
++  baton->size = dwarf2_per_objfile->loc.size - DW_UNSND (attr);
++  baton->data = dwarf2_per_objfile->loc.buffer + DW_UNSND (attr);
++  baton->base_address = cu->base_address;
++}
++
+ static void
+ dwarf2_symbol_mark_computed (struct attribute *attr, struct symbol *sym,
+ 			     struct dwarf2_cu *cu)
+@@ -14133,17 +14174,9 @@ dwarf2_symbol_mark_computed (struct attribute *attr, struct symbol *sym,
+ 
+       baton = obstack_alloc (&cu->objfile->objfile_obstack,
+ 			     sizeof (struct dwarf2_loclist_baton));
+-      baton->per_cu = cu->per_cu;
+-      gdb_assert (baton->per_cu);
+ 
+-      dwarf2_read_section (dwarf2_per_objfile->objfile,
+-			   &dwarf2_per_objfile->loc);
++      fill_in_loclist_baton (cu, baton, attr);
+ 
+-      /* We don't know how long the location list is, but make sure we
+-	 don't run off the edge of the section.  */
+-      baton->size = dwarf2_per_objfile->loc.size - DW_UNSND (attr);
+-      baton->data = dwarf2_per_objfile->loc.buffer + DW_UNSND (attr);
+-      baton->base_address = cu->base_address;
+       if (cu->base_known == 0)
+ 	complaint (&symfile_complaints,
+ 		   _("Location list used without specifying the CU base address."));
+diff --git a/gdb/jv-valprint.c b/gdb/jv-valprint.c
+index 0a2cc538aa3..eff396e0a4f 100644
+--- a/gdb/jv-valprint.c
++++ b/gdb/jv-valprint.c
+@@ -394,6 +394,14 @@ java_print_value_fields (struct type *type, const gdb_byte *valaddr,
+ 		{
+ 		  fputs_filtered ("<optimized out or zero length>", stream);
+ 		}
++	      else if (value_bits_synthetic_pointer (val,
++						     TYPE_FIELD_BITPOS (type,
++									i),
++						     TYPE_FIELD_BITSIZE (type,
++									 i)))
++		{
++		  fputs_filtered (_("<synthetic pointer>"), stream);
++		}
+ 	      else if (!value_bits_valid (val, TYPE_FIELD_BITPOS (type, i),
+ 					  TYPE_FIELD_BITSIZE (type, i)))
+ 		{
+diff --git a/gdb/opencl-lang.c b/gdb/opencl-lang.c
+index 088d49af32c..ef0214c4b79 100644
+--- a/gdb/opencl-lang.c
++++ b/gdb/opencl-lang.c
+@@ -327,6 +327,43 @@ lval_func_check_any_valid (const struct value *v)
+   return 0;
+ }
+ 
++/* Return nonzero if bits in V from OFFSET and LENGTH represent a
++   synthetic pointer.  */
++
++static int
++lval_func_check_synthetic_pointer (const struct value *v,
++				   int offset, int length)
++{
++  struct lval_closure *c = (struct lval_closure *) value_computed_closure (v);
++  /* Size of the target type in bits.  */
++  int elsize =
++      TYPE_LENGTH (TYPE_TARGET_TYPE (check_typedef (value_type (c->val)))) * 8;
++  int startrest = offset % elsize;
++  int start = offset / elsize;
++  int endrest = (offset + length) % elsize;
++  int end = (offset + length) / elsize;
++  int i;
++
++  if (endrest)
++    end++;
++
++  if (end > c->n)
++    return 0;
++
++  for (i = start; i < end; i++)
++    {
++      int startoffset = (i == start) ? startrest : 0;
++      int length = (i == end) ? endrest : elsize;
++
++      if (!value_bits_synthetic_pointer (c->val,
++					 c->indices[i] * elsize + startoffset,
++					 length))
++	return 0;
++    }
++
++  return 1;
++}
++
+ static void *
+ lval_func_copy_closure (const struct value *v)
+ {
+@@ -358,6 +395,8 @@ static struct lval_funcs opencl_value_funcs =
+     lval_func_write,
+     lval_func_check_validity,
+     lval_func_check_any_valid,
++    NULL,
++    lval_func_check_synthetic_pointer,
+     lval_func_copy_closure,
+     lval_func_free_closure
+   };
+diff --git a/gdb/p-valprint.c b/gdb/p-valprint.c
+index 44a2d72e5d5..47663bd0849 100644
+--- a/gdb/p-valprint.c
++++ b/gdb/p-valprint.c
+@@ -779,6 +779,14 @@ pascal_object_print_value_fields (struct type *type, const gdb_byte *valaddr,
+ 		{
+ 		  fputs_filtered ("<optimized out or zero length>", stream);
+ 		}
++	      else if (value_bits_synthetic_pointer (val,
++						     TYPE_FIELD_BITPOS (type,
++									i),
++						     TYPE_FIELD_BITSIZE (type,
++									 i)))
++		{
++		  fputs_filtered (_("<synthetic pointer>"), stream);
++		}
+ 	      else if (!value_bits_valid (val, TYPE_FIELD_BITPOS (type, i),
+ 					  TYPE_FIELD_BITSIZE (type, i)))
+ 		{
+diff --git a/gdb/testsuite/ChangeLog b/gdb/testsuite/ChangeLog
+index 22c34768c1d..3564704c090 100644
+--- a/gdb/testsuite/ChangeLog
++++ b/gdb/testsuite/ChangeLog
+@@ -1,3 +1,9 @@
++2010-11-29  Tom Tromey  <tromey@redhat.com>
++
++	* gdb.dwarf2/implptr.exp: New file.
++	* gdb.dwarf2/implptr.c: New file.
++	* gdb.dwarf2/implptr.S: New file.
++
+ 2010-11-29  Phil Muldoon  <pmuldoon@redhat.com>
+ 
+         PR python/12199
+diff --git a/gdb/testsuite/gdb.dwarf2/implptr.S b/gdb/testsuite/gdb.dwarf2/implptr.S
+new file mode 100644
+index 00000000000..8ea793ccc1d
+--- /dev/null
++++ b/gdb/testsuite/gdb.dwarf2/implptr.S
+@@ -0,0 +1,882 @@
++	.file	"implptr.c"
++	.text
++.Ltext0:
++	.p2align 4,,15
++	.globl	foo
++	.type	foo, @function
++foo:
++.LFB1:
++	.file 1 "implptr.c"
++	.loc 1 45 0
++	.cfi_startproc
++.LVL0:
++	.loc 1 45 0
++	movl	4(%esp), %eax
++.LVL1:
++.LBB6:
++.LBB7:
++	.loc 1 36 0
++	addl	$1, u
++.LVL2:
++	.loc 1 38 0
++	addl	$1, u+4
++.LVL3:
++	.loc 1 40 0
++	addl	$1, u+8
++.LVL4:
++.LBE7:
++.LBE6:
++.LBB8:
++.LBB9:
++	.loc 1 36 0
++	addl	$1, u+12
++.LVL5:
++	.loc 1 38 0
++	addl	$1, u+16
++.LVL6:
++	.loc 1 40 0
++	addl	$1, u+20
++.LBE9:
++.LBE8:
++	.loc 1 52 0
++	leal	(%eax,%eax,4), %eax
++	.loc 1 53 0
++	ret
++	.cfi_endproc
++.LFE1:
++	.size	foo, .-foo
++	.p2align 4,,15
++	.globl	bar
++	.type	bar, @function
++bar:
++.LFB2:
++	.loc 1 57 0
++	.cfi_startproc
++.LVL7:
++	.loc 1 61 0
++	movl	4(%esp), %eax
++	addl	$1, %eax
++	.loc 1 63 0
++	ret
++	.cfi_endproc
++.LFE2:
++	.size	bar, .-bar
++	.p2align 4,,15
++	.globl	main
++	.type	main, @function
++main:
++.LFB3:
++	.loc 1 66 0
++	.cfi_startproc
++	pushl	%ebx
++	.cfi_def_cfa_offset 8
++	.cfi_offset 3, -8
++	subl	$4, %esp
++	.cfi_def_cfa_offset 12
++	.loc 1 67 0
++	movl	$5, (%esp)
++	call	bar
++	movl	$23, (%esp)
++	movl	%eax, %ebx
++	call	foo
++	.loc 1 68 0
++	addl	$4, %esp
++	.cfi_def_cfa_offset 8
++	.loc 1 67 0
++	addl	%ebx, %eax
++	.loc 1 68 0
++	popl	%ebx
++	.cfi_def_cfa_offset 4
++	.cfi_restore 3
++	ret
++	.cfi_endproc
++.LFE3:
++	.size	main, .-main
++	.comm	u,24,4
++.Letext0:
++	.section	.debug_types,"G",@progbits,wt.ade46b36db7edab6,comdat
++	.long	0x46
++	.value	0x4
++	.long	.Ldebug_abbrev0
++	.byte	0x4
++	.byte	0xad
++	.byte	0xe4
++	.byte	0x6b
++	.byte	0x36
++	.byte	0xdb
++	.byte	0x7e
++	.byte	0xda
++	.byte	0xb6
++	.long	0x1d
++	.uleb128 0x1
++	.byte	0x1
++	.long	.Ldebug_line0
++	.uleb128 0x2
++	.string	"S"
++	.byte	0x8
++	.byte	0x1
++	.byte	0x18
++	.long	0x3c
++	.uleb128 0x3
++	.string	"x"
++	.byte	0x1
++	.byte	0x1a
++	.long	0x3c
++	.byte	0
++	.uleb128 0x3
++	.string	"y"
++	.byte	0x1
++	.byte	0x1a
++	.long	0x42
++	.byte	0x4
++	.byte	0
++	.uleb128 0x4
++	.byte	0x4
++	.long	0x42
++	.uleb128 0x5
++	.byte	0x4
++	.byte	0x5
++	.string	"int"
++	.byte	0
++	.section	.debug_info,"",@progbits
++.Ldebug_info0:
++	.long	0x1b6
++	.value	0x4
++	.long	.Ldebug_abbrev0
++	.byte	0x4
++	.uleb128 0x6
++	.long	.LASF1
++	.byte	0x1
++	.long	.LASF2
++	.long	.LASF3
++	.long	.Ltext0
++	.long	.Letext0
++	.long	.Ldebug_line0
++	.uleb128 0x4
++	.byte	0x4
++	.long	0x2b
++	.uleb128 0x5
++	.byte	0x4
++	.byte	0x5
++	.string	"int"
++	.uleb128 0x7
++	.string	"add"
++	.byte	0x1
++	.byte	0x20
++	.byte	0x3
++	.long	0x5a
++	.uleb128 0x8
++	.string	"a"
++	.byte	0x1
++	.byte	0x20
++	.long	0x5a
++	.uleb128 0x8
++	.string	"b"
++	.byte	0x1
++	.byte	0x20
++	.long	0x5a
++	.uleb128 0x8
++	.string	"c"
++	.byte	0x1
++	.byte	0x20
++	.long	0x2b
++	.byte	0
++	.uleb128 0x9
++	.byte	0x4
++	.byte	0xad
++	.byte	0xe4
++	.byte	0x6b
++	.byte	0x36
++	.byte	0xdb
++	.byte	0x7e
++	.byte	0xda
++	.byte	0xb6
++	.uleb128 0xa
++	.string	"foo"
++	.byte	0x1
++	.byte	0x2c
++	.long	0x2b
++	.long	.LFB1
++	.long	.LFE1
++	.uleb128 0x1
++	.byte	0x9c
++	.long	0xff
++	.uleb128 0xb
++	.string	"i"
++	.byte	0x1
++	.byte	0x2c
++	.long	0x2b
++	.long	.LLST0
++	.uleb128 0xc
++	.string	"j"
++	.byte	0x1
++	.byte	0x2e
++	.long	0x2b
++	.long	.LLST1
++	.uleb128 0xc
++	.string	"p"
++	.byte	0x1
++	.byte	0x2f
++	.long	0xff
++	.long	.LLST2
++	.uleb128 0xd
++	.long	0x32
++	.long	.LBB6
++	.long	.LBE6
++	.byte	0x1
++	.byte	0x30
++	.long	0xd3
++	.uleb128 0xe
++	.long	0x50
++	.byte	0
++	.uleb128 0xf
++	.long	0x47
++	.uleb128 0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+151
++	.sleb128 8
++	.uleb128 0x10
++	.long	0x3e
++	.long	.LLST3
++	.byte	0
++	.uleb128 0x11
++	.long	0x32
++	.long	.LBB8
++	.long	.LBE8
++	.byte	0x1
++	.byte	0x33
++	.uleb128 0xe
++	.long	0x50
++	.byte	0x3
++	.uleb128 0xf
++	.long	0x47
++	.uleb128 0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+151
++	.sleb128 8
++	.uleb128 0x10
++	.long	0x3e
++	.long	.LLST4
++	.byte	0
++	.byte	0
++	.uleb128 0x12
++	.byte	0xad
++	.byte	0xe4
++	.byte	0x6b
++	.byte	0x36
++	.byte	0xdb
++	.byte	0x7e
++	.byte	0xda
++	.byte	0xb6
++	.long	0x113
++	.uleb128 0x13
++	.long	0x113
++	.byte	0x1
++	.byte	0
++	.uleb128 0x14
++	.byte	0x4
++	.byte	0x7
++	.long	.LASF0
++	.uleb128 0xa
++	.string	"bar"
++	.byte	0x1
++	.byte	0x38
++	.long	0x2b
++	.long	.LFB2
++	.long	.LFE2
++	.uleb128 0x1
++	.byte	0x9c
++	.long	0x170
++	.uleb128 0x15
++	.string	"i"
++	.byte	0x1
++	.byte	0x38
++	.long	0x2b
++	.uleb128 0x2
++	.byte	0x91
++	.sleb128 0
++	.uleb128 0x16
++	.string	"j"
++	.byte	0x1
++	.byte	0x3a
++	.long	0x25
++	.uleb128 0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+307
++	.sleb128 0
++	.uleb128 0x16
++	.string	"k"
++	.byte	0x1
++	.byte	0x3b
++	.long	0x170
++	.uleb128 0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+319
++	.sleb128 0
++	.uleb128 0x16
++	.string	"l"
++	.byte	0x1
++	.byte	0x3c
++	.long	0x176
++	.uleb128 0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+335
++	.sleb128 0
++	.byte	0
++	.uleb128 0x4
++	.byte	0x4
++	.long	0x25
++	.uleb128 0x4
++	.byte	0x4
++	.long	0x170
++	.uleb128 0x17
++	.long	.LASF4
++	.byte	0x1
++	.byte	0x41
++	.long	0x2b
++	.long	.LFB3
++	.long	.LFE3
++	.uleb128 0x1
++	.byte	0x9c
++	.uleb128 0x18
++	.long	0x2b
++	.long	0x1a1
++	.uleb128 0x13
++	.long	0x113
++	.byte	0x5
++	.byte	0
++	.uleb128 0x19
++	.string	"u"
++	.byte	0x1
++	.byte	0x1d
++	.long	0x191
++	.uleb128 0x1a
++	.string	"u"
++	.byte	0x1
++	.byte	0x1d
++	.long	0x191
++	.uleb128 0x5
++	.byte	0x3
++	.long	u
++	.byte	0
++	.section	.debug_abbrev,"",@progbits
++.Ldebug_abbrev0:
++	.uleb128 0x1
++	.uleb128 0x41
++	.byte	0x1
++	.uleb128 0x13
++	.uleb128 0xb
++	.uleb128 0x10
++	.uleb128 0x17
++	.byte	0
++	.byte	0
++	.uleb128 0x2
++	.uleb128 0x13
++	.byte	0x1
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0xb
++	.uleb128 0xb
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x1
++	.uleb128 0x13
++	.byte	0
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0xd
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x38
++	.uleb128 0xb
++	.byte	0
++	.byte	0
++	.uleb128 0x4
++	.uleb128 0xf
++	.byte	0
++	.uleb128 0xb
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.byte	0
++	.byte	0
++	.uleb128 0x5
++	.uleb128 0x24
++	.byte	0
++	.uleb128 0xb
++	.uleb128 0xb
++	.uleb128 0x3e
++	.uleb128 0xb
++	.uleb128 0x3
++	.uleb128 0x8
++	.byte	0
++	.byte	0
++	.uleb128 0x6
++	.uleb128 0x11
++	.byte	0x1
++	.uleb128 0x25
++	.uleb128 0xe
++	.uleb128 0x13
++	.uleb128 0xb
++	.uleb128 0x3
++	.uleb128 0xe
++	.uleb128 0x1b
++	.uleb128 0xe
++	.uleb128 0x11
++	.uleb128 0x1
++	.uleb128 0x12
++	.uleb128 0x1
++	.uleb128 0x10
++	.uleb128 0x17
++	.byte	0
++	.byte	0
++	.uleb128 0x7
++	.uleb128 0x2e
++	.byte	0x1
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x27
++	.uleb128 0x19
++	.uleb128 0x20
++	.uleb128 0xb
++	.uleb128 0x1
++	.uleb128 0x13
++	.byte	0
++	.byte	0
++	.uleb128 0x8
++	.uleb128 0x5
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.byte	0
++	.byte	0
++	.uleb128 0x9
++	.uleb128 0xf
++	.byte	0
++	.uleb128 0xb
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x20
++	.byte	0
++	.byte	0
++	.uleb128 0xa
++	.uleb128 0x2e
++	.byte	0x1
++	.uleb128 0x3f
++	.uleb128 0x19
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x27
++	.uleb128 0x19
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x11
++	.uleb128 0x1
++	.uleb128 0x12
++	.uleb128 0x1
++	.uleb128 0x40
++	.uleb128 0x18
++	.uleb128 0x1
++	.uleb128 0x13
++	.byte	0
++	.byte	0
++	.uleb128 0xb
++	.uleb128 0x5
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x2
++	.uleb128 0x17
++	.byte	0
++	.byte	0
++	.uleb128 0xc
++	.uleb128 0x34
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x2
++	.uleb128 0x17
++	.byte	0
++	.byte	0
++	.uleb128 0xd
++	.uleb128 0x1d
++	.byte	0x1
++	.uleb128 0x31
++	.uleb128 0x13
++	.uleb128 0x11
++	.uleb128 0x1
++	.uleb128 0x12
++	.uleb128 0x1
++	.uleb128 0x58
++	.uleb128 0xb
++	.uleb128 0x59
++	.uleb128 0xb
++	.uleb128 0x1
++	.uleb128 0x13
++	.byte	0
++	.byte	0
++	.uleb128 0xe
++	.uleb128 0x5
++	.byte	0
++	.uleb128 0x31
++	.uleb128 0x13
++	.uleb128 0x1c
++	.uleb128 0xb
++	.byte	0
++	.byte	0
++	.uleb128 0xf
++	.uleb128 0x5
++	.byte	0
++	.uleb128 0x31
++	.uleb128 0x13
++	.uleb128 0x2
++	.uleb128 0x18
++	.byte	0
++	.byte	0
++	.uleb128 0x10
++	.uleb128 0x5
++	.byte	0
++	.uleb128 0x31
++	.uleb128 0x13
++	.uleb128 0x2
++	.uleb128 0x17
++	.byte	0
++	.byte	0
++	.uleb128 0x11
++	.uleb128 0x1d
++	.byte	0x1
++	.uleb128 0x31
++	.uleb128 0x13
++	.uleb128 0x11
++	.uleb128 0x1
++	.uleb128 0x12
++	.uleb128 0x1
++	.uleb128 0x58
++	.uleb128 0xb
++	.uleb128 0x59
++	.uleb128 0xb
++	.byte	0
++	.byte	0
++	.uleb128 0x12
++	.uleb128 0x1
++	.byte	0x1
++	.uleb128 0x49
++	.uleb128 0x20
++	.uleb128 0x1
++	.uleb128 0x13
++	.byte	0
++	.byte	0
++	.uleb128 0x13
++	.uleb128 0x21
++	.byte	0
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x2f
++	.uleb128 0xb
++	.byte	0
++	.byte	0
++	.uleb128 0x14
++	.uleb128 0x24
++	.byte	0
++	.uleb128 0xb
++	.uleb128 0xb
++	.uleb128 0x3e
++	.uleb128 0xb
++	.uleb128 0x3
++	.uleb128 0xe
++	.byte	0
++	.byte	0
++	.uleb128 0x15
++	.uleb128 0x5
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x2
++	.uleb128 0x18
++	.byte	0
++	.byte	0
++	.uleb128 0x16
++	.uleb128 0x34
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x2
++	.uleb128 0x18
++	.byte	0
++	.byte	0
++	.uleb128 0x17
++	.uleb128 0x2e
++	.byte	0
++	.uleb128 0x3f
++	.uleb128 0x19
++	.uleb128 0x3
++	.uleb128 0xe
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x11
++	.uleb128 0x1
++	.uleb128 0x12
++	.uleb128 0x1
++	.uleb128 0x40
++	.uleb128 0x18
++	.byte	0
++	.byte	0
++	.uleb128 0x18
++	.uleb128 0x1
++	.byte	0x1
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x1
++	.uleb128 0x13
++	.byte	0
++	.byte	0
++	.uleb128 0x19
++	.uleb128 0x34
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x3f
++	.uleb128 0x19
++	.uleb128 0x3c
++	.uleb128 0x19
++	.byte	0
++	.byte	0
++	.uleb128 0x1a
++	.uleb128 0x34
++	.byte	0
++	.uleb128 0x3
++	.uleb128 0x8
++	.uleb128 0x3a
++	.uleb128 0xb
++	.uleb128 0x3b
++	.uleb128 0xb
++	.uleb128 0x49
++	.uleb128 0x13
++	.uleb128 0x3f
++	.uleb128 0x19
++	.uleb128 0x2
++	.uleb128 0x18
++	.byte	0
++	.byte	0
++	.byte	0
++	.section	.debug_loc,"",@progbits
++.Ldebug_loc0:
++.LLST0:
++	.long	.LVL0-.Ltext0
++	.long	.LVL1-.Ltext0
++	.value	0x2
++	.byte	0x91
++	.sleb128 0
++	.long	.LVL1-.Ltext0
++	.long	.LFE1-.Ltext0
++	.value	0x6
++	.byte	0x91
++	.sleb128 0
++	.byte	0x6
++	.byte	0x31
++	.byte	0x24
++	.byte	0x9f
++	.long	0
++	.long	0
++.LLST1:
++	.long	.LVL1-.Ltext0
++	.long	.LVL4-.Ltext0
++	.value	0x2
++	.byte	0x91
++	.sleb128 0
++	.long	.LVL4-.Ltext0
++	.long	.LFE1-.Ltext0
++	.value	0x6
++	.byte	0x91
++	.sleb128 0
++	.byte	0x6
++	.byte	0x33
++	.byte	0x1e
++	.byte	0x9f
++	.long	0
++	.long	0
++.LLST2:
++	.long	.LVL1-.Ltext0
++	.long	.LVL4-.Ltext0
++	.value	0x20
++	.byte	0xf2
++	.long	.Ldebug_info0+125
++	.sleb128 0
++	.byte	0x93
++	.uleb128 0x4
++	.byte	0x91
++	.sleb128 0
++	.byte	0x6
++	.byte	0x32
++	.byte	0x24
++	.byte	0x9f
++	.byte	0x93
++	.uleb128 0x4
++	.byte	0xf2
++	.long	.Ldebug_info0+138
++	.sleb128 0
++	.byte	0x93
++	.uleb128 0x4
++	.byte	0x91
++	.sleb128 0
++	.byte	0x6
++	.byte	0x31
++	.byte	0x24
++	.byte	0x9f
++	.byte	0x93
++	.uleb128 0x4
++	.long	.LVL4-.Ltext0
++	.long	.LFE1-.Ltext0
++	.value	0x20
++	.byte	0xf2
++	.long	.Ldebug_info0+138
++	.sleb128 0
++	.byte	0x93
++	.uleb128 0x4
++	.byte	0x91
++	.sleb128 0
++	.byte	0x6
++	.byte	0x36
++	.byte	0x1e
++	.byte	0x9f
++	.byte	0x93
++	.uleb128 0x4
++	.byte	0xf2
++	.long	.Ldebug_info0+125
++	.sleb128 0
++	.byte	0x93
++	.uleb128 0x4
++	.byte	0x91
++	.sleb128 0
++	.byte	0x6
++	.byte	0x31
++	.byte	0x24
++	.byte	0x9f
++	.byte	0x93
++	.uleb128 0x4
++	.long	0
++	.long	0
++.LLST3:
++	.long	.LVL1-.Ltext0
++	.long	.LVL2-.Ltext0
++	.value	0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+151
++	.sleb128 0
++	.long	.LVL2-.Ltext0
++	.long	.LVL3-.Ltext0
++	.value	0x2
++	.byte	0x30
++	.byte	0x9f
++	.long	.LVL3-.Ltext0
++	.long	.LFE1-.Ltext0
++	.value	0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+151
++	.sleb128 8
++	.long	0
++	.long	0
++.LLST4:
++	.long	.LVL4-.Ltext0
++	.long	.LVL5-.Ltext0
++	.value	0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+151
++	.sleb128 0
++	.long	.LVL5-.Ltext0
++	.long	.LVL6-.Ltext0
++	.value	0x2
++	.byte	0x30
++	.byte	0x9f
++	.long	.LVL6-.Ltext0
++	.long	.LFE1-.Ltext0
++	.value	0x6
++	.byte	0xf2
++	.long	.Ldebug_info0+151
++	.sleb128 8
++	.long	0
++	.long	0
++	.section	.debug_aranges,"",@progbits
++	.long	0x1c
++	.value	0x2
++	.long	.Ldebug_info0
++	.byte	0x4
++	.byte	0
++	.value	0
++	.value	0
++	.long	.Ltext0
++	.long	.Letext0-.Ltext0
++	.long	0
++	.long	0
++	.section	.debug_line,"",@progbits
++.Ldebug_line0:
++	.section	.debug_str,"MS",@progbits,1
++.LASF0:
++	.string	"unsigned int"
++.LASF3:
++	.string	"/home/tromey/gnu/archer/archer/gdb/testsuite/gdb.dwarf2"
++.LASF4:
++	.string	"main"
++.LASF2:
++	.string	"implptr.c"
++.LASF1:
++	.string	"GNU C 4.6.0 20101116 (experimental) [trunk revision 166803]"
++	.ident	"GCC: (GNU) 4.6.0 20101116 (experimental) [trunk revision 166803]"
++	.section	.note.GNU-stack,"",@progbits
+diff --git a/gdb/testsuite/gdb.dwarf2/implptr.c b/gdb/testsuite/gdb.dwarf2/implptr.c
+new file mode 100644
+index 00000000000..640be8017f0
+--- /dev/null
++++ b/gdb/testsuite/gdb.dwarf2/implptr.c
+@@ -0,0 +1,68 @@
++/* Copyright (C) 2010 Free Software Foundation, Inc.
++
++   This file is part of GDB.
++
++   This program is free software; you can redistribute it and/or modify
++   it under the terms of the GNU General Public License as published by
++   the Free Software Foundation; either version 3 of the License, or
++   (at your option) any later version.
++
++   This program is distributed in the hope that it will be useful,
++   but WITHOUT ANY WARRANTY; without even the implied warranty of
++   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++   GNU General Public License for more details.
++
++   You should have received a copy of the GNU General Public License
++   along with this program.  If not, see <http://www.gnu.org/licenses/>.  */
++
++/* The original program corresponding to implptr.S.
++   This came from Jakub's gcc-patches email implementing
++   DW_OP_GNU_implicit_pointer.
++   Note that it is not ever compiled, implptr.S is used instead.
++   However, it is used to extract breakpoint line numbers.  */
++
++struct S
++{
++  int *x, y;
++};
++
++int u[6];
++
++static inline void
++add (struct S *a, struct S *b, int c)
++{
++  *a->x += *b->x;
++  a->y += b->y;
++  u[c + 0]++;
++  a = (struct S *) 0;
++  u[c + 1]++;
++  a = b;
++  u[c + 2]++;
++}
++
++int
++foo (int i)
++{
++  int j = i;
++  struct S p[2] = { {&i, i * 2}, {&j, j * 2} };
++  add (&p[0], &p[1], 0);
++  p[0].x = &j;
++  p[1].x = &i;
++  add (&p[0], &p[1], 3);
++  return i + j;			/* foo breakpoint */
++}
++
++int __attribute__ ((noinline, used, noclone)) 
++bar (int i) 
++{
++  int *j = &i;
++  int **k = &j;
++  int ***l = &k;
++  i++;				/* bar breakpoint */
++  return i;
++}
++
++int main ()
++{
++  return bar(5) + foo (23);
++}
+diff --git a/gdb/testsuite/gdb.dwarf2/implptr.exp b/gdb/testsuite/gdb.dwarf2/implptr.exp
+new file mode 100644
+index 00000000000..fa399089560
+--- /dev/null
++++ b/gdb/testsuite/gdb.dwarf2/implptr.exp
+@@ -0,0 +1,80 @@
++# Copyright 2010 Free Software Foundation, Inc.
++
++# This program is free software; you can redistribute it and/or modify
++# it under the terms of the GNU General Public License as published by
++# the Free Software Foundation; either version 3 of the License, or
++# (at your option) any later version.
++#
++# This program is distributed in the hope that it will be useful,
++# but WITHOUT ANY WARRANTY; without even the implied warranty of
++# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++# GNU General Public License for more details.
++#
++# You should have received a copy of the GNU General Public License
++# along with this program.  If not, see <http://www.gnu.org/licenses/>.
++
++# Test DW_OP_GNU_implicit_pointer.
++
++# This test can only be run on targets which support DWARF-2 and use gas.
++# For now pick a sampling of likely targets.
++if {![istarget *-*-linux*]
++    && ![istarget *-*-gnu*]
++    && ![istarget *-*-elf*]
++    && ![istarget *-*-openbsd*]
++    && ![istarget arm-*-eabi*]
++    && ![istarget powerpc-*-eabi*]} {
++    return 0  
++}
++# This test can only be run on x86 targets.
++if {![istarget i?86-*]} {
++    return 0  
++}
++
++set testfile "implptr"
++set srcfile ${testfile}.S
++set csrcfile ${testfile}.c
++set binfile ${objdir}/${subdir}/${testfile}.x
++
++if {[prepare_for_testing ${testfile}.exp ${testfile}.x $srcfile]} {
++    return -1
++}
++
++if ![runto_main] {
++    return -1
++}
++
++# Test various pointer depths in bar.
++proc implptr_test_bar {} {
++    global csrcfile
++    set line [gdb_get_line_number "bar breakpoint" $csrcfile]
++    gdb_test "break implptr.c:$line" "Breakpoint 2.*" \
++       "set bar breakpoint for implptr"
++    gdb_continue_to_breakpoint "continue to bar breakpoint for implptr"
++    gdb_test "print j" " = .int .. <synthetic pointer>" "print j in implptr:bar"
++    gdb_test "print *j" " = 5" "print *j in implptr:bar"
++    gdb_test "print **k" " = 5" "print **k in implptr:bar"
++    gdb_test "print ***l" " = 5" "print ***l in implptr:bar"
++}
++
++# Test some values in foo.
++proc implptr_test_foo {} {
++    global csrcfile
++    set line [gdb_get_line_number "foo breakpoint" $csrcfile]
++    gdb_test "break implptr.c:$line" "Breakpoint 3.*" \
++	"set foo breakpoint for implptr"
++    gdb_continue_to_breakpoint "continue to foo breakpoint for implptr"
++    gdb_test "print p\[0].x" " = .int .. <synthetic pointer>" \
++	"print p\[0].x in implptr:foo"
++    gdb_test "print *p\[0].x" " = 69" \
++	"print *p\[0].x in implptr:foo"
++    gdb_test "print/d *(((char *) p\[0].x) + 1)" " = 0" \
++	"print byte inside *p\[0].x in implptr:foo"
++    gdb_test "print *(p\[0].x + 10)" \
++	"access outside bounds of object referenced via synthetic pointer" \
++	"print invalid offset from *p\[0].x in implptr:foo"
++    gdb_test "print j" " = 69" \
++	"print j in implptr:foo"
++}
++
++implptr_test_bar
++implptr_test_foo
+diff --git a/gdb/valarith.c b/gdb/valarith.c
+index 7c553d1ca4a..36e937dcc56 100644
+--- a/gdb/valarith.c
++++ b/gdb/valarith.c
+@@ -90,13 +90,17 @@ value_ptradd (struct value *arg1, LONGEST arg2)
+ {
+   struct type *valptrtype;
+   LONGEST sz;
++  struct value *result;
+ 
+   arg1 = coerce_array (arg1);
+   valptrtype = check_typedef (value_type (arg1));
+   sz = find_size_for_pointer_math (valptrtype);
+ 
+-  return value_from_pointer (valptrtype,
+-			     value_as_address (arg1) + sz * arg2);
++  result = value_from_pointer (valptrtype,
++			       value_as_address (arg1) + sz * arg2);
++  if (VALUE_LVAL (result) != lval_internalvar)
++    set_value_component_location (result, arg1);
++  return result;
+ }
+ 
+ /* Given two compatible pointer values ARG1 and ARG2, return the
+diff --git a/gdb/valops.c b/gdb/valops.c
+index 932e31166bb..e115b311302 100644
+--- a/gdb/valops.c
++++ b/gdb/valops.c
+@@ -1618,6 +1618,19 @@ value_ind (struct value *arg1)
+ 
+   base_type = check_typedef (value_type (arg1));
+ 
++  if (VALUE_LVAL (arg1) == lval_computed)
++    {
++      struct lval_funcs *funcs = value_computed_funcs (arg1);
++
++      if (funcs->indirect)
++	{
++	  struct value *result = funcs->indirect (arg1);
++
++	  if (result)
++	    return result;
++	}
++    }
++
+   if (TYPE_CODE (base_type) == TYPE_CODE_PTR)
+     {
+       struct type *enc_type;
+diff --git a/gdb/valprint.c b/gdb/valprint.c
+index ddb16e4847c..5cba023c10b 100644
+--- a/gdb/valprint.c
++++ b/gdb/valprint.c
+@@ -273,6 +273,13 @@ valprint_check_validity (struct ui_file *stream,
+ 	  fprintf_filtered (stream, _("<value optimized out>"));
+ 	  return 0;
+ 	}
++
++      if (value_bits_synthetic_pointer (val, TARGET_CHAR_BIT * offset,
++					TARGET_CHAR_BIT * TYPE_LENGTH (type)))
++	{
++	  fputs_filtered (_("<synthetic pointer>"), stream);
++	  return 0;
++	}
+     }
+ 
+   return 1;
+diff --git a/gdb/value.c b/gdb/value.c
+index d1ca3dc3363..aa8384cdc82 100644
+--- a/gdb/value.c
++++ b/gdb/value.c
+@@ -536,6 +536,18 @@ value_bits_valid (const struct value *value, int offset, int length)
+ 							 length);
+ }
+ 
++int
++value_bits_synthetic_pointer (const struct value *value,
++			      int offset, int length)
++{
++  if (value == NULL || value->lval != lval_computed
++      || !value->location.computed.funcs->check_synthetic_pointer)
++    return 0;
++  return value->location.computed.funcs->check_synthetic_pointer (value,
++								  offset,
++								  length);
++}
++
+ int
+ value_embedded_offset (struct value *value)
+ {
+diff --git a/gdb/value.h b/gdb/value.h
+index ef2cb4fa1dd..cf089be562f 100644
+--- a/gdb/value.h
++++ b/gdb/value.h
+@@ -173,6 +173,16 @@ struct lval_funcs
+   /* Return 1 if any bit in VALUE is valid, 0 if they are all invalid.  */
+   int (*check_any_valid) (const struct value *value);
+ 
++  /* If non-NULL, this is used to implement pointer indirection for
++     this value.  This method may return NULL, in which case value_ind
++     will fall back to ordinary indirection.  */
++  struct value *(*indirect) (struct value *value);
++
++  /* If non-NULL, this is used to determine whether the indicated bits
++     of VALUE are a synthetic pointer.  */
++  int (*check_synthetic_pointer) (const struct value *value,
++				  int offset, int length);
++
+   /* Return a duplicate of VALUE's closure, for use in a new value.
+      This may simply return the same closure, if VALUE's is
+      reference-counted or statically allocated.
+@@ -338,6 +348,12 @@ extern struct value *coerce_array (struct value *value);
+ extern int value_bits_valid (const struct value *value,
+ 			     int offset, int length);
+ 
++/* Given a value, determine whether the bits starting at OFFSET and
++   extending for LENGTH bits are a synthetic pointer.  */
++
++extern int value_bits_synthetic_pointer (const struct value *value,
++					 int offset, int length);
++
+ 
+ 
+ #include "symtab.h"

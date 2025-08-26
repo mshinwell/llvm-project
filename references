@@ -1,0 +1,16 @@
+This is the original proposal for extending the DWARF standard:
+https://dwarfstd.org/issues/100831.1.html
+
+The PDF file "DWARF5 implicit ptrs only.pdf" contains pages from the
+actual DWARF standard, to which we must conform.
+
+The file "gdb-implicit-ptrs.patch" contains the diff for supporting
+implicit pointers in the gdb debugger, which can be used for reference.
+
+One of the main ideas is that you have to be able to distinguish in
+the debugger between:
+1. pointers to memory in the target program being debugged (this is the normal case);
+2. implicit pointers, which are pointers to memory in the *debugger's* address
+space, where we are going to conjure up values based on descriptions in the
+DWARF associated with the given executable.
+
